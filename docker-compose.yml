@@ -1,0 +1,115 @@
+services:
+  # ----------------------------------------------------------------------------
+  # PostgreSQL Database
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: sentinelx-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sentinelx}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentinelx_secure_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-sentinelx_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sentinelx} -d ${POSTGRES_DB:-sentinelx_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - sentinelx-network
+
+  # ----------------------------------------------------------------------------
+  # Redis Cache & Pub/Sub Broker
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: sentinelx-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - sentinelx-network
+
+  # ----------------------------------------------------------------------------
+  # SentinelX FastAPI Backend
+  # ----------------------------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: sentinelx-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DEBUG=${DEBUG:-true}
+      - SECRET_KEY=${SECRET_KEY:-sentinelx-insecure-development-secret-key-change-me-in-production-min-32-chars}
+      - POSTGRES_SERVER=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-sentinelx}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-sentinelx_secure_dev_password}
+      - POSTGRES_DB=${POSTGRES_DB:-sentinelx_db}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-sentinelx}:${POSTGRES_PASSWORD:-sentinelx_secure_dev_password}@postgres:5432/${POSTGRES_DB:-sentinelx_db}
+      - DATABASE_URL_SYNC=postgresql://${POSTGRES_USER:-sentinelx}:${POSTGRES_PASSWORD:-sentinelx_secure_dev_password}@postgres:5432/${POSTGRES_DB:-sentinelx_db}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis:6379/0
+      - CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - sentinelx-network
+
+  # ----------------------------------------------------------------------------
+  # SentinelX React SOC Frontend
+  # ----------------------------------------------------------------------------
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    container_name: sentinelx-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - sentinelx-network
+
+networks:
+  sentinelx-network:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redisdata:

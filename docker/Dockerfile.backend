@@ -1,0 +1,51 @@
+# ==============================================================================
+# SentinelX Backend Dockerfile
+# Python 3.12-slim base image with security hardening
+# ==============================================================================
+
+FROM python:3.12-slim AS builder
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir --user -r /app/requirements.txt
+
+# Final runtime image
+FROM python:3.12-slim AS runner
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH=/home/sentinelx/.local/bin:$PATH \
+    PYTHONPATH=/app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Run as non-privileged system user
+RUN useradd -m -u 10001 -s /bin/bash sentinelx
+
+COPY --from=builder /root/.local /home/sentinelx/.local
+COPY --chown=sentinelx:sentinelx backend/ /app/backend/
+COPY --chown=sentinelx:sentinelx rules/ /app/rules/
+
+USER sentinelx
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]

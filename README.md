@@ -1,11 +1,275 @@
-<div align="center">
+# SentinelX — AI-Powered SOC & Threat Detection Platform
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+SentinelX is an enterprise-grade defensive Security Operations Center (SOC) and SIEM monitoring platform engineered for authorized laboratory environments, detection engineering, and incident response automation.
 
-  <h1>Built with AI Studio</h2>
+---
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## 1. Project Overview & Architecture
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+SentinelX ingests raw telemetry from Windows and Linux endpoints, normalizes security events, evaluates detection rules against sliding time windows, correlates multi-event threat chains, calculates explainable 0–100 risk scores, enriches indicators with threat intelligence, and streams real-time alerts to a dark-mode SOC dashboard.
 
-</div>
+### Telemetry & Detection Pipeline
+
+```
+Collectors (Windows Event Log / Linux Syslog / Network)
+                   │
+                   ▼
+       Event Ingestion API (POST /api/events)
+                   │
+                   ▼
+            Event Normalizer
+                   │
+         ┌─────────┴─────────┐
+         ▼                   ▼
+  Event Storage       Detection Engine (Rules 001–010)
+  (PostgreSQL 16)            │
+                             ▼
+                     Correlation Engine
+                             │
+                             ▼
+                    Risk Scoring (0–100)
+                             │
+                             ▼
+                 Threat Intelligence Enrichment
+                             │
+                             ▼
+                      Alert Engine
+                             │
+                             ▼
+                    Incident Management
+                             │
+         ┌───────────────────┴───────────────────┐
+         ▼                                       ▼
+  SOC Web Dashboard                     Safe Controlled Response
+  (React / WebSockets)                  (Simulated Lab Containment)
+```
+
+---
+
+## 2. Technology Stack
+
+- **Backend**: Python 3.12+, FastAPI, SQLAlchemy 2.0 (Async), Alembic, Pydantic v2, PostgreSQL 16, Redis 7, WebSockets, Pytest
+- **Frontend**: React 19, TypeScript, Vite, Tailwind CSS, Lucide Icons
+- **Deployment**: Docker, Docker Compose (multi-stage builds)
+- **Security**: Argon2id password hashing, JWT authentication, Role-Based Access Control (Admin, Analyst, Viewer), HTTP Security Headers (CSP, HSTS, X-Frame-Options: DENY, X-Content-Type-Options: nosniff), strict input validation
+
+---
+
+## 3. Repository Structure
+
+```
+sentinelx/
+├── backend/
+│   ├── app/
+│   │   ├── main.py                  # FastAPI application entrypoint & lifespan
+│   │   ├── api/                     # Modular API routers
+│   │   │   ├── health.py            # Health-check endpoint (/health & /api/v1/health)
+│   │   │   ├── auth.py              # Authentication & JWT endpoints (Phase 2)
+│   │   │   ├── alerts.py            # Alert triage & state endpoints (Phase 4)
+│   │   │   ├── events.py            # Event ingestion endpoints (Phase 3)
+│   │   │   ├── hosts.py             # Host inventory endpoints (Phase 6)
+│   │   │   ├── incidents.py         # Incident management endpoints (Phase 5)
+│   │   │   ├── rules.py             # Detection rule management endpoints (Phase 4)
+│   │   │   ├── threat_intel.py      # Threat intelligence lookups (Phase 8)
+│   │   │   └── websocket.py         # Real-time WebSocket event broadcaster (Phase 7)
+│   │   ├── core/                    # Core system infrastructure
+│   │   │   ├── config.py            # Pydantic BaseSettings & environment loader
+│   │   │   ├── database.py          # SQLAlchemy 2.0 async engine & sessionmaker
+│   │   │   ├── redis.py             # Redis client & connection pool manager
+│   │   │   ├── logging.py           # Structured JSON logger
+│   │   │   └── security.py          # Argon2id password hashing & JWT token handling
+│   │   ├── models/                  # SQLAlchemy 2.0 ORM database models
+│   │   │   ├── user.py              # Users & RBAC roles
+│   │   │   ├── host.py              # Endpoint inventory & agent status
+│   │   │   ├── event.py             # Partitioned security event storage
+│   │   │   ├── alert.py             # Detection alerts & risk factors
+│   │   │   ├── incident.py          # Aggregated security incidents
+│   │   │   ├── rule.py              # Configurable detection rules
+│   │   │   ├── threat_intel.py      # Cached threat intelligence indicators
+│   │   │   └── audit.py             # Immutable administrative audit logs
+│   │   ├── schemas/                 # Pydantic request/response schemas
+│   │   │   ├── health.py            # Health status schema
+│   │   │   ├── user.py              # User & JWT schemas
+│   │   │   ├── event.py             # Normalized event ingestion schema
+│   │   │   ├── alert.py             # Alert lifecycle schema
+│   │   │   ├── incident.py          # Incident tracking schema
+│   │   │   ├── rule.py              # Rule definition schema
+│   │   │   └── threat_intel.py      # Indicator lookup schema
+│   │   ├── detection/               # Detection & analytical engines
+│   │   │   ├── engine.py            # Detection rule evaluator
+│   │   │   ├── correlation.py       # Multi-event correlation engine
+│   │   │   ├── risk.py              # Explainable 0–100 risk scoring engine
+│   │   │   └── mitre.py             # MITRE ATT&CK enterprise mapping
+│   │   ├── collectors/              # Telemetry normalizers
+│   │   │   ├── windows.py           # Windows Event Log normalizer
+│   │   │   ├── linux.py             # Linux auditd/syslog normalizer
+│   │   │   └── network.py           # Network flow normalizer
+│   │   ├── response/                # Response action framework
+│   │   │   ├── actions.py           # Safe lab-simulated response actions
+│   │   │   └── firewall.py          # Defensive firewall adapter with safety locks
+│   │   └── services/                # Domain business logic services
+│   │       ├── alert_service.py
+│   │       ├── incident_service.py
+│   │       ├── intel_service.py
+│   │       └── event_service.py
+│   └── requirements.txt             # Pinned backend dependencies
+├── collectors/                      # Host agent source directories
+│   ├── windows-agent/
+│   └── linux-agent/
+├── database/
+│   └── migrations/                  # Alembic database migrations
+├── docker/
+│   ├── Dockerfile.backend           # Hardened multi-stage Python 3.12 image
+│   └── Dockerfile.frontend          # Hardened multi-stage Node/Nginx image
+├── docs/                            # Architectural documentation
+│   ├── architecture.md
+│   ├── api.md
+│   ├── detection-rules.md
+│   ├── deployment.md
+│   ├── security.md
+│   └── testing.md
+├── rules/                           # Detection rule definitions
+│   ├── authentication/
+│   ├── network/
+│   ├── process/
+│   └── web/
+├── src/                             # React SOC Frontend (TypeScript & Tailwind)
+│   ├── components/
+│   │   ├── Header.tsx               # Status bar with live health ping
+│   │   ├── Sidebar.tsx              # SOC navigation & phase badges
+│   │   ├── StatusBadge.tsx          # Real-time state indicators
+│   │   ├── ServiceTopology.tsx      # Infrastructure status & latency grid
+│   │   ├── ArchitecturePipeline.tsx # 10-stage detection pipeline flow
+│   │   ├── HealthChecker.tsx        # Interactive diagnostic terminal
+│   │   └── PhaseRoadmap.tsx         # Phased deliverables tracker
+│   ├── pages/
+│   │   └── DashboardOverview.tsx    # Primary SOC overview page
+│   ├── services/
+│   │   └── api.ts                   # API client with health diagnostics
+│   ├── types/
+│   │   └── index.ts                 # Shared TypeScript interfaces
+│   ├── App.tsx                      # Main application view
+│   └── main.tsx                     # DOM mounting point
+├── tests/                           # Automated test suite
+│   ├── conftest.py                  # Pytest fixtures & environment setup
+│   ├── test_config.py               # Settings, risk scoring & MITRE tests
+│   ├── test_health.py               # Healthcheck serialization tests
+│   ├── test_models_syntax.py        # Schema contracts validation
+│   └── test_collectors_and_response.py # Normalizers & safe response tests
+├── docker-compose.yml               # Multi-container orchestration
+├── .env.example                     # Environment configuration template
+├── .gitignore                       # Git ignore rules
+└── README.md                        # Master documentation
+```
+
+---
+
+## 4. Setup & Running Instructions
+
+### Method A: Docker Compose (Recommended)
+
+1. **Configure Environment**:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. **Start All Services**:
+   ```bash
+   docker compose up --build -d
+   ```
+
+3. **Verify Service Health**:
+   ```bash
+   docker compose ps
+   curl -s http://localhost:8000/health
+   ```
+
+4. **Access Applications**:
+   - SOC Web Dashboard: [http://localhost:3000](http://localhost:3000)
+   - Interactive OpenAPI Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
+   - Redoc Specification: [http://localhost:8000/redoc](http://localhost:8000/redoc)
+
+---
+
+### Method B: Local Development (Without Docker)
+
+#### 1. Backend (FastAPI)
+```bash
+# Create and activate virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install dependencies
+pip install -r backend/requirements.txt
+
+# Start backend server
+uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+#### 2. Frontend (React / Vite)
+```bash
+npm install
+npm run dev
+```
+
+---
+
+## 5. Automated Testing
+
+### Run backend tests:
+```bash
+# Standard unittest (runs with zero extra dependencies):
+python3 -m unittest discover tests -v
+
+# Or using pytest:
+pytest -v tests/
+```
+
+### Run frontend type verification and build:
+```bash
+npm run lint
+npm run build
+```
+
+---
+
+## 6. Expected Health-Check Response
+
+### Endpoint: `GET /health` or `GET /api/v1/health`
+
+```json
+{
+  "status": "healthy",
+  "version": "0.1.0-alpha",
+  "environment": "development",
+  "timestamp": "2026-09-28T16:20:00.123456Z",
+  "services": {
+    "api": {
+      "status": "healthy",
+      "latency_ms": 0.05,
+      "message": "FastAPI core dispatcher active"
+    },
+    "database": {
+      "status": "healthy",
+      "latency_ms": 2.14,
+      "message": "PostgreSQL connection verified (sentinelx_db)"
+    },
+    "redis": {
+      "status": "healthy",
+      "latency_ms": 0.88,
+      "message": "Redis cache and pub/sub operational"
+    }
+  }
+}
+```
+
+---
+
+## 7. Security Considerations & Lab-Only Warning
+
+> ⚠️ **DEFENSIVE LABORATORY WARNING**
+> SentinelX includes capabilities for endpoint isolation and IP blocking. In the default configuration:
+> - All response actions execute in **SAFE LAB SIMULATION MODE**.
+> - Real firewall modification requires explicit administrative authorization and a verified allowlist.
+> - Destructive operations are strictly prohibited by default.
+> - An immutable audit log record is generated for every action taken by an operator.

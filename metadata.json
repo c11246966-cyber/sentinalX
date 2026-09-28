@@ -1,0 +1,6 @@
+{
+  "name": "SentinelX — AI-Powered SOC & Threat Detection Platform",
+  "description": "Enterprise defensive cybersecurity platform with real-time event ingestion, detection engine, MITRE ATT&CK correlation, and SOC monitoring dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
