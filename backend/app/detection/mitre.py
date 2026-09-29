@@ -73,6 +73,55 @@ MITRE_TACTICS_TECHNIQUES: Dict[str, Dict[str, str]] = {
         "description": "Adversaries may abuse task scheduling systems to facilitate initial or recurring execution of malicious code.",
         "url": "https://attack.mitre.org/techniques/T1053/",
     },
+    "T1059.001": {
+        "id": "T1059.001",
+        "technique": "Command and Scripting Interpreter: PowerShell",
+        "tactic": "Execution",
+        "description": "Adversaries may abuse PowerShell commands and scripts for execution, download cradles, and memory injection.",
+        "url": "https://attack.mitre.org/techniques/T1059/001/",
+    },
+    "T1059.003": {
+        "id": "T1059.003",
+        "technique": "Command and Scripting Interpreter: Windows Command Shell",
+        "tactic": "Execution",
+        "description": "Adversaries may abuse the Windows command shell (cmd.exe) to execute utility commands and discovery tools.",
+        "url": "https://attack.mitre.org/techniques/T1059/003/",
+    },
+    "T1490": {
+        "id": "T1490",
+        "technique": "Inhibit System Recovery",
+        "tactic": "Impact",
+        "description": "Adversaries may delete or disable system recovery files and shadow copies (vssadmin delete shadows, wbadmin).",
+        "url": "https://attack.mitre.org/techniques/T1490/",
+    },
+    "T1003": {
+        "id": "T1003",
+        "technique": "OS Credential Dumping",
+        "tactic": "Credential Access",
+        "description": "Adversaries may attempt to dump credentials from the operating system memory, SAM database, or LSA secrets.",
+        "url": "https://attack.mitre.org/techniques/T1003/",
+    },
+    "T1562.001": {
+        "id": "T1562.001",
+        "technique": "Impair Defenses: Disable or Modify Tools",
+        "tactic": "Defense Evasion",
+        "description": "Adversaries may disable or modify defensive tools such as Windows Defender or Antivirus to evade detection.",
+        "url": "https://attack.mitre.org/techniques/T1562/001/",
+    },
+    "T1078.002": {
+        "id": "T1078.002",
+        "technique": "Valid Accounts: Domain Accounts",
+        "tactic": "Defense Evasion",
+        "description": "Adversaries may obtain and abuse credentials of domain accounts to gain access and assign elevated privileges.",
+        "url": "https://attack.mitre.org/techniques/T1078/002/",
+    },
+    "T1071": {
+        "id": "T1071",
+        "technique": "Application Layer Protocol",
+        "tactic": "Command and Control",
+        "description": "Adversaries may communicate using application layer protocols to avoid detection and egress filter restrictions.",
+        "url": "https://attack.mitre.org/techniques/T1071/",
+    },
 }
 
 

@@ -68,13 +68,55 @@ def normalize_event_payload(payload: EventIngest) -> Dict[str, Any]:
     status_code=status.HTTP_201_CREATED,
     include_in_schema=False,
 )
+@router.post(
+    "/ingest",
+    response_model=EventIngestResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Ingest security telemetry from endpoint collector agents",
+)
 async def ingest_event(
     payload: EventIngest,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[Optional[User], Depends(get_current_user_optional)],
+    x_collector_id: Optional[str] = Header(None, alias="X-Collector-ID"),
+    x_collector_key: Optional[str] = Header(None, alias="X-Collector-Key"),
 ) -> EventIngestResponse:
     """Ingest, normalize, persist, evaluate rules, and correlate incident."""
+    # Collector authorization check if collector headers supplied
+    if x_collector_id:
+        try:
+            import hashlib
+            from backend.app.models.collector import Collector
+            col_stmt = select(Collector).where(Collector.collector_id == x_collector_id)
+            col_res = await db.execute(col_stmt)
+            collector = col_res.scalar_one_or_none()
+            if not collector:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Collector ID.")
+            if x_collector_key:
+                token_hash = hashlib.sha256(x_collector_key.encode("utf-8")).hexdigest()
+                if token_hash != collector.api_key_hash:
+                    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Collector Key.")
+            collector.event_count += 1
+            collector.last_seen = datetime.now(timezone.utc)
+            collector.status = "ONLINE"
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
     norm = normalize_event_payload(payload)
+
+    # Duplicate check on event_id if provided
+    if norm.get("event_id"):
+        dup_stmt = select(SecurityEvent.id).where(SecurityEvent.event_id == norm["event_id"])
+        dup_res = await db.execute(dup_stmt)
+        if dup_res.scalar_one_or_none():
+            return EventIngestResponse(
+                status="DUPLICATE_IGNORED",
+                ingested_count=0,
+                event_ids=[norm["event_id"]],
+                generated_alerts=[],
+            )
 
     # 1. Store normalized event in PostgreSQL
     db_event = SecurityEvent(
@@ -107,16 +149,26 @@ async def ingest_event(
     generated_alert_dicts = []
 
     for alert_info in detected_alerts:
+        # Phase 5: Threat Intelligence Enrichment & Risk Adjustment
+        enriched_info = dict(alert_info)
+        try:
+            from backend.app.threat_intel.service import ThreatIntelManager
+            enriched_info = await ThreatIntelManager.enrich_and_adjust_alert(enriched_info, db=db)
+        except Exception:
+            pass
+
         db_alert = Alert(
             event_id=db_event.id,
-            title=alert_info["title"],
-            description=alert_info["description"],
-            severity=alert_info["severity"],
-            risk_score=alert_info["risk_score"],
-            source_ip=alert_info.get("source_ip"),
-            destination_ip=alert_info.get("destination_ip"),
-            mitre_technique=alert_info.get("mitre_technique"),
-            mitre_tactic=alert_info.get("mitre_tactic"),
+            title=enriched_info["title"],
+            description=enriched_info["description"],
+            severity=enriched_info.get("severity", alert_info["severity"]),
+            risk_score=enriched_info.get("risk_score", alert_info["risk_score"]),
+            source_ip=enriched_info.get("source_ip"),
+            destination_ip=enriched_info.get("destination_ip"),
+            mitre_technique=enriched_info.get("mitre_technique"),
+            mitre_tactic=enriched_info.get("mitre_tactic"),
+            threat_intel_context=enriched_info.get("threat_intel_context"),
+            risk_adjustment_reason=enriched_info.get("risk_adjustment_reason"),
             status="NEW",
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -134,6 +186,8 @@ async def ingest_event(
             "mitre_technique": db_alert.mitre_technique,
             "source_ip": db_alert.source_ip,
             "destination_ip": db_alert.destination_ip,
+            "threat_intel_context": db_alert.threat_intel_context,
+            "risk_adjustment_reason": db_alert.risk_adjustment_reason,
             "created_at": db_alert.created_at.isoformat(),
         }
         generated_alert_dicts.append(alert_dict)

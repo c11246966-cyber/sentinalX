@@ -1,0 +1,4 @@
+# SentinelX Windows Endpoint Collector Dependencies
+# Core functionality runs with Python 3.10+ Standard Library alone.
+# For live Windows Event Log access on native Windows systems:
+pywin32>=306; sys_platform == 'win32'

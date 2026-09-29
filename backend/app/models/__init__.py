@@ -8,6 +8,7 @@ from backend.app.models.incident import Incident
 from backend.app.models.rule import DetectionRule
 from backend.app.models.threat_intel import ThreatIntelligence
 from backend.app.models.audit import AuditLog
+from backend.app.models.collector import Collector
 
 __all__ = [
     "User",
@@ -18,4 +19,5 @@ __all__ = [
     "DetectionRule",
     "ThreatIntelligence",
     "AuditLog",
+    "Collector",
 ]

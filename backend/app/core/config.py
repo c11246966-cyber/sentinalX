@@ -137,6 +137,9 @@ class Settings(BaseSettings):
     VIRUSTOTAL_API_KEY: Optional[str] = None
     ABUSEIPDB_API_KEY: Optional[str] = None
     ALIENVAULT_OTX_KEY: Optional[str] = None
+    OTX_API_KEY: Optional[str] = None
+    THREAT_INTEL_CACHE_TTL_SECONDS: int = 3600
+    THREAT_INTEL_TIMEOUT_SECONDS: int = 5
 
 
 # Global singleton settings instance

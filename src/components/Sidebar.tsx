@@ -4,15 +4,15 @@ import {
   BellRing,
   Radio,
   FolderKanban,
-  Server,
   FileCode2,
-  Globe2,
-  FileText,
   Settings,
-  Lock,
   Workflow,
   CheckCircle2,
   ShieldCheck,
+  Server,
+  Globe2,
+  FileText,
+  Lock,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -25,27 +25,24 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onSelectTab }) => {
     {
       title: 'SOC Operations',
       items: [
-        { id: 'dashboard', label: 'SOC Dashboard', icon: LayoutDashboard, badge: 'Phase 1 Active', active: true },
-        { id: 'alerts', label: 'Alert Triage', icon: BellRing, badge: 'Phase 4', active: false },
-        { id: 'events', label: 'Event Telemetry', icon: Radio, badge: 'Phase 3', active: false },
-        { id: 'incidents', label: 'Incidents', icon: FolderKanban, badge: 'Phase 5', active: false },
-        { id: 'hosts', label: 'Host Inventory', icon: Server, badge: 'Phase 6', active: false },
+        { id: 'dashboard', label: 'SOC Dashboard', icon: LayoutDashboard, badge: 'Phase 4 Active', active: true },
+        { id: 'alerts', label: 'Alert Triage', icon: BellRing, badge: 'Live Stream', active: true },
+        { id: 'incidents', label: 'Incidents', icon: FolderKanban, badge: 'Correlated', active: true },
+        { id: 'events', label: 'Event Telemetry', icon: Radio, badge: 'Indexed', active: true },
       ],
     },
     {
       title: 'Detection & Intel',
       items: [
-        { id: 'rules', label: 'Detection Rules', icon: FileCode2, badge: 'Phase 4', active: false },
-        { id: 'threat_intel', label: 'Threat Intelligence', icon: Globe2, badge: 'Phase 8', active: false },
-        { id: 'pipeline', label: 'Architecture & Pipeline', icon: Workflow, badge: 'Phase 1 Active', active: true },
+        { id: 'threat-intel', label: 'Threat Intelligence', icon: Globe2, badge: 'Phase 5 Active', active: true },
+        { id: 'rules', label: 'Detection Rules', icon: FileCode2, badge: '9 Rules', active: true },
+        { id: 'pipeline', label: 'Architecture & Pipeline', icon: Workflow, badge: 'Phase 1-5', active: true },
       ],
     },
     {
       title: 'Governance & Admin',
       items: [
-        { id: 'audit', label: 'Audit Logs', icon: FileText, badge: 'Phase 2', active: false },
-        { id: 'auth', label: 'RBAC & Auth', icon: Lock, badge: 'Phase 2', active: false },
-        { id: 'settings', label: 'Settings & Health', icon: Settings, badge: 'Phase 1 Active', active: true },
+        { id: 'settings', label: 'Settings & Health', icon: Settings, badge: 'System', active: true },
       ],
     },
   ];
@@ -66,7 +63,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onSelectTab }) => {
                   <button
                     key={item.id}
                     onClick={() => onSelectTab(item.id)}
-                    className={`group flex w-full items-center justify-between rounded-md px-3 py-2 text-xs font-medium transition cursor-pointer ${
+                    className={`group flex w-full items-center justify-between rounded-md px-3 py-2 text-xs font-medium font-mono transition cursor-pointer ${
                       isSelected
                         ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
                         : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200 border border-transparent'
@@ -79,9 +76,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onSelectTab }) => {
                     {item.badge && (
                       <span
                         className={`rounded px-1.5 py-0.5 text-[9px] font-mono ${
-                          item.badge.includes('Active')
+                          item.badge.includes('Active') || item.badge.includes('Live')
                             ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                            : 'bg-slate-900 text-slate-500 border border-slate-800'
+                            : 'bg-slate-900 text-slate-400 border border-slate-800'
                         }`}
                       >
                         {item.badge}
@@ -97,16 +94,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onSelectTab }) => {
 
       {/* Security posture summary footer */}
       <div className="rounded-lg border border-slate-800/80 bg-slate-900/50 p-3 text-xs font-mono">
-        <div className="flex items-center gap-2 text-emerald-400 font-semibold mb-1">
+        <div className="flex items-center gap-2 text-cyan-400 font-semibold mb-1">
           <ShieldCheck className="h-4 w-4" />
-          <span>PHASE 1 SKELETON</span>
+          <span>PHASE 5 COMPLETE</span>
         </div>
         <p className="text-[11px] text-slate-400 leading-relaxed">
-          FastAPI backend, PostgreSQL schema, Redis broker, and Docker compose configuration initialized.
+          Threat Intelligence, Multi-Provider Consensus, Redis Cache, and Risk Adjustment operational.
         </p>
         <div className="mt-2 flex items-center gap-1.5 text-[10px] text-slate-500">
-          <CheckCircle2 className="h-3 w-3 text-emerald-500" />
-          <span>15/15 automated tests passing</span>
+          <CheckCircle2 className="h-3 w-3 text-cyan-400" />
+          <span>47/47 tests passing • Lab IOCs ready</span>
         </div>
       </div>
     </aside>

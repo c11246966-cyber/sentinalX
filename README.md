@@ -273,3 +273,85 @@ npm run build
 > - Real firewall modification requires explicit administrative authorization and a verified allowlist.
 > - Destructive operations are strictly prohibited by default.
 > - An immutable audit log record is generated for every action taken by an operator.
+
+---
+
+## 8. Phase 5: Threat Intelligence & Indicator Enrichment
+
+### Architecture Overview
+
+SentinelX Phase 5 adds a modular Threat Intelligence and Indicator Enrichment layer that correlates external intelligence feeds and local curated IOC catalogs with incoming security events and alerts:
+
+```
+Security Event (Source IP, Dest IP, Domain, Hash, URL)
+       │
+       ▼
+Detection Engine (Rules 001–010 triggered)
+       │
+       ▼
+Indicator Extraction & SSRF Validation
+       │
+       ▼
+Threat Intelligence Manager
+ ┌─────┼────────────────────────────┬────────────────────────────┐
+ ▼     ▼                            ▼                            ▼
+Redis Cache (TTL)    VirusTotal v3         AbuseIPDB v2          AlienVault OTX
+       │             (Hash/IP/Domain/URL)  (IPv4/IPv6)           (Pulses/Threats)
+       ▼
+Multi-Provider Consensus & Normalization
+       │
+       ▼
+Explainable Risk Adjuster (Deterministic [0-100] Scoring)
+       │
+       ▼
+Enriched Alert + Updated Incident Correlation
+       │
+       ▼
+Real-Time SOC Dashboard (SSE / Threat Intelligence Dossier)
+```
+
+### Supported Threat Intelligence Providers
+
+1. **VirusTotal (v3 API)**: Enriches IPv4, domains, URLs, and file hashes (MD5, SHA1, SHA256). Normalizes detection engine ratios into malicious, suspicious, or clean verdicts.
+2. **AbuseIPDB (v2 API)**: Enriches IPv4 and IPv6 addresses. Extracts abuse confidence scores, reports, and threat categories (brute force, port scan, DDoS, web attacks).
+3. **AlienVault OTX**: Enriches IPv4, IPv6, domains, URLs, and hashes against threat exchange pulses, malware families, and adversary tracking.
+4. **Internal Curated Feed**: Built-in baseline provider providing RFC1918 private network classification, loopback identification, and curated IOC test signatures for deterministic laboratory testing.
+
+### Provider Credentials & Graceful Degradation
+
+- All provider API keys MUST come strictly from environment variables (`VIRUSTOTAL_API_KEY`, `ABUSEIPDB_API_KEY`, `OTX_API_KEY`).
+- Keys are never hardcoded, never logged, and never returned to the frontend or API callers.
+- If an API key is missing or invalid, the provider **gracefully disables itself** (`configured: false`), reporting safe metadata without crashing or halting event ingestion.
+
+### SSRF Protection & Safe Handling
+
+- **Private Network Isolation**: Threat queries targeting RFC1918 private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), loopback (`127.0.0.1`), link-local (`169.254.0.0/16`), or cloud metadata endpoints (`metadata.google.internal`) are intercepted and resolved internally to prevent SSRF vulnerabilities and internal telemetry leakage.
+- **No Remote Code Execution**: Indicators are treated as passive data. SentinelX never executes binaries, visits malicious links, or executes indicator strings as shell commands.
+
+### Redis Caching Strategy
+
+- Threat intelligence lookups are cached in Redis under `sentinelx:intel:{type}:{indicator}` with a configurable TTL (default: 3600 seconds / 1 hour).
+- If Redis is unavailable or unconfigured, queries seamlessly fall back to an in-memory cache with bounded LRU eviction (max 1000 items).
+- Rate limits (HTTP 429) trigger a 60-second backoff window during which external API calls are throttled and fallback indicators are returned.
+
+### Deterministic Risk Scoring Formula
+
+Threat intelligence influences risk scores in a strictly deterministic, bounded (0–100), and explainable manner:
+- **Malicious Reputation**: Base addition of +15 to +25 points (scaled by provider confidence).
+- **Multi-Provider Consensus**: +10 bonus points when 2 or more independent providers confirm malicious status.
+- **High-Impact Threat Tags**: +5 bonus points for critical tags (`c2`, `ransomware`, `botnet`, `tor_exit_node`, `exploit`).
+- **Verified Benign**: -5 points reduction for verified clean infrastructure (when base severity is below HIGH).
+- **Bounded Clamping**: Final risk score is clamped between 0 and 100. A single provider response cannot automatically turn an alert to CRITICAL unless the score reaches 90+.
+- **Audit Explanation**: Every adjustment records a line-item rationale stored in `risk_adjustment_reason`.
+
+### Threat Intelligence REST APIs
+
+| Method | Endpoint | Role | Description |
+|---|---|---|---|
+| `GET` | `/api/v1/threat-intel/providers` | Viewer+ | Safe provider status metadata (no secrets returned) |
+| `POST` | `/api/v1/threat-intel/enrich` | Analyst+ | On-demand IOC enrichment with audit logging |
+| `GET` | `/api/v1/threat-intel/indicators` | Viewer+ | Filterable catalog of enriched threat indicators |
+| `GET` | `/api/v1/threat-intel/indicators/{indicator}` | Viewer+ | Retrieve full intelligence dossier for an IOC |
+| `GET` | `/api/v1/threat-intel/indicators/{indicator}/related-alerts` | Viewer+ | Active alerts mapped to this indicator |
+| `GET` | `/api/v1/threat-intel/indicators/{indicator}/related-incidents` | Viewer+ | Correlated incidents containing this indicator |
+

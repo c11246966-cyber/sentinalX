@@ -1,7 +1,7 @@
-"""Alert management model."""
+"""Alert management model with Phase 4 notes and Phase 5 threat intel enrichment."""
 
 from datetime import datetime, timezone
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.app.core.database import Base
 
@@ -17,12 +17,14 @@ class Alert(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False)
     severity: Mapped[str] = mapped_column(String(20), default="MEDIUM", index=True, nullable=False)  # INFORMATIONAL, LOW, MEDIUM, HIGH, CRITICAL
     risk_score: Mapped[int] = mapped_column(Integer, default=50, index=True, nullable=False)  # 0-100
-    status: Mapped[str] = mapped_column(String(30), default="NEW", index=True, nullable=False)  # NEW, TRIAGED, INVESTIGATING, RESOLVED, FALSE_POSITIVE
+    status: Mapped[str] = mapped_column(String(30), default="NEW", index=True, nullable=False)  # NEW, ACKNOWLEDGED, INVESTIGATING, RESOLVED, FALSE_POSITIVE, TRIAGED
     source_ip: Mapped[str | None] = mapped_column(String(45), index=True, nullable=True)
     destination_ip: Mapped[str | None] = mapped_column(String(45), index=True, nullable=True)
     mitre_tactic: Mapped[str | None] = mapped_column(String(100), nullable=True)
     mitre_technique: Mapped[str | None] = mapped_column(String(100), nullable=True)
     analyst_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    threat_intel_context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    risk_adjustment_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

@@ -40,21 +40,6 @@ app.get(['/health', '/api/v1/health'], (_req: Request, res: Response) => {
   });
 });
 
-// Threat intelligence proxy / fallback endpoint
-app.get('/api/v1/threat-intel/:indicator', (req: Request, res: Response) => {
-  const indicator = req.params.indicator;
-  const isPrivate = indicator.startsWith('10.') || indicator.startsWith('192.168.') || indicator.startsWith('127.0.0.1');
-  res.json({
-    indicator,
-    indicator_type: 'ip',
-    reputation: isPrivate ? 'clean' : 'unknown',
-    confidence: isPrivate ? 100 : 0,
-    active_providers: ['internal'],
-    external_lookups_enabled: false,
-    status: isPrivate ? 'enriched' : 'no_external_match',
-  });
-});
-
 // Phase 2 Auth and User mock state for preview server
 interface MockUser {
   id: number;
@@ -272,6 +257,8 @@ interface MockAlert {
   mitre_tactic?: string;
   mitre_technique?: string;
   analyst_notes?: string;
+  threat_intel_context?: any;
+  risk_adjustment_reason?: string;
   created_at: string;
   updated_at: string;
 }
@@ -280,30 +267,53 @@ const mockAlerts: MockAlert[] = [
   {
     id: 1,
     event_id: 1,
+    incident_id: 1,
     title: 'Port Scanning Activity Detected from 192.0.2.100',
     description: 'Source 192.0.2.100 probed multiple ports across infrastructure within short window.',
-    severity: 'HIGH',
-    risk_score: 85,
+    severity: 'MEDIUM',
+    risk_score: 75,
     status: 'NEW',
     source_ip: '192.0.2.100',
     destination_ip: '10.0.0.10',
     mitre_tactic: 'Discovery',
     mitre_technique: 'T1046',
+    threat_intel_context: {
+      indicator: '192.0.2.100',
+      indicator_type: 'ipv4',
+      provider: 'internal',
+      reputation: 'suspicious',
+      confidence: 85,
+      severity: 'MEDIUM',
+      tags: ['reconnaissance_source', 'port_scanner'],
+    },
+    risk_adjustment_reason: 'Risk adjusted from 65 to 75 (+10 pts): Indicator 192.0.2.100 evaluated as SUSPICIOUS (confidence 85%) by internal feed.',
     created_at: new Date(Date.now() - 300000).toISOString(),
     updated_at: new Date(Date.now() - 300000).toISOString(),
   },
   {
     id: 2,
     event_id: 2,
+    incident_id: 1,
     title: 'SSH Brute Force Attack from 198.51.100.50',
     description: 'Consecutive SSH authentication failures detected targeting root.',
-    severity: 'HIGH',
-    risk_score: 90,
+    severity: 'CRITICAL',
+    risk_score: 95,
     status: 'INVESTIGATING',
     source_ip: '198.51.100.50',
     destination_ip: '10.0.0.20',
     mitre_tactic: 'Credential Access',
     mitre_technique: 'T1110.001',
+    threat_intel_context: {
+      indicator: '198.51.100.50',
+      indicator_type: 'ipv4',
+      provider: 'consensus',
+      providers_reporting: ['abuseipdb', 'internal'],
+      reputation: 'malicious',
+      confidence: 92,
+      severity: 'HIGH',
+      tags: ['brute_force_botnet', 'credential_access', 'ssh_attacker'],
+    },
+    risk_adjustment_reason: 'Risk adjusted from 70 to 95 (+25 pts): Indicator 198.51.100.50 evaluated as MALICIOUS (confidence 92%) by consensus. Factors: Malicious reputation (+20 pts); Multi-provider consensus (+5 pts).',
     created_at: new Date(Date.now() - 200000).toISOString(),
     updated_at: new Date(Date.now() - 180000).toISOString(),
   },
@@ -319,6 +329,17 @@ const mockAlerts: MockAlert[] = [
     destination_ip: '10.0.0.30',
     mitre_tactic: 'Initial Access',
     mitre_technique: 'T1190',
+    threat_intel_context: {
+      indicator: '203.0.113.15',
+      indicator_type: 'ipv4',
+      provider: 'consensus',
+      providers_reporting: ['virustotal', 'internal'],
+      reputation: 'malicious',
+      confidence: 88,
+      severity: 'HIGH',
+      tags: ['web_attack_source', 'sqli_probe', 'initial_access'],
+    },
+    risk_adjustment_reason: 'Risk adjusted from 68 to 88 (+20 pts): Indicator 203.0.113.15 evaluated as MALICIOUS (confidence 88%) by consensus.',
     created_at: new Date(Date.now() - 100000).toISOString(),
     updated_at: new Date(Date.now() - 100000).toISOString(),
   },
@@ -538,17 +559,34 @@ app.post('/api/v1/events', (req: Request, res: Response) => {
   // Check if synthetic alert triggers
   const generatedAlerts: any[] = [];
   if (newEvt.event_type === 'port_scan' || newEvt.destination_port === 22 || newEvt.event_type.includes('fail') || newEvt.event_type.includes('flood')) {
+    // Phase 5 Threat Intelligence Enrichment & Risk Adjustment
+    const intelMatch = mockThreatIntelRecords.find(r => r.indicator === newEvt.source_ip);
+    let alertRisk = newEvt.severity === 'CRITICAL' ? 95 : 85;
+    let alertSev = newEvt.severity === 'CRITICAL' ? 'CRITICAL' : 'HIGH';
+    let riskReason: string | undefined = undefined;
+
+    if (intelMatch && intelMatch.reputation === 'malicious') {
+      alertRisk = Math.min(100, alertRisk + 10);
+      alertSev = 'CRITICAL';
+      riskReason = `Threat Intel elevated risk (+10): Indicator ${intelMatch.indicator} identified as MALICIOUS (${intelMatch.tags.join(', ')}) with ${intelMatch.confidence}% confidence.`;
+    } else if (intelMatch && intelMatch.reputation === 'suspicious') {
+      alertRisk = Math.min(100, alertRisk + 5);
+      riskReason = `Threat Intel adjusted risk (+5): Indicator ${intelMatch.indicator} flagged as SUSPICIOUS (${intelMatch.tags.join(', ')}).`;
+    }
+
     const alert: MockAlert = {
       id: mockAlerts.length + 1,
       event_id: newEvt.id,
       title: `Detection Triggered: ${newEvt.event_type} from ${newEvt.source_ip || 'host'}`,
       description: newEvt.message,
-      severity: newEvt.severity === 'CRITICAL' ? 'CRITICAL' : 'HIGH',
-      risk_score: newEvt.severity === 'CRITICAL' ? 95 : 85,
+      severity: alertSev,
+      risk_score: alertRisk,
       status: 'NEW',
       source_ip: newEvt.source_ip,
       destination_ip: newEvt.destination_ip,
       mitre_technique: newEvt.mitre_technique || 'T1046',
+      threat_intel_context: intelMatch || undefined,
+      risk_adjustment_reason: riskReason,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -731,6 +769,542 @@ app.get('/api/v1/risk-scores/calculate', (req: Request, res: Response) => {
     ],
   });
 });
+
+// Phase 5 Threat Intelligence Models & In-Memory Storage
+interface MockThreatIntelRecord {
+  id: number;
+  indicator: string;
+  indicator_type: 'ipv4' | 'ipv6' | 'domain' | 'url' | 'hash';
+  provider: string;
+  providers_reporting: string[];
+  reputation: 'clean' | 'suspicious' | 'malicious' | 'unknown';
+  confidence: number;
+  severity: string;
+  tags: string[];
+  source: string;
+  first_seen: string;
+  last_seen: string;
+  raw_response?: any;
+  created_at: string;
+  updated_at: string;
+}
+
+const mockThreatIntelRecords: MockThreatIntelRecord[] = [
+  {
+    id: 1,
+    indicator: '198.51.100.50',
+    indicator_type: 'ipv4',
+    provider: 'consensus',
+    providers_reporting: ['abuseipdb', 'internal'],
+    reputation: 'malicious',
+    confidence: 92,
+    severity: 'HIGH',
+    tags: ['brute_force_botnet', 'credential_access', 'ssh_attacker'],
+    source: 'threat_intel',
+    first_seen: new Date(Date.now() - 86400000).toISOString(),
+    last_seen: new Date().toISOString(),
+    raw_response: { abuseConfidenceScore: 92, reports: 34, country: 'US' },
+    created_at: new Date(Date.now() - 86400000).toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: 2,
+    indicator: '192.0.2.100',
+    indicator_type: 'ipv4',
+    provider: 'internal',
+    providers_reporting: ['internal'],
+    reputation: 'suspicious',
+    confidence: 85,
+    severity: 'MEDIUM',
+    tags: ['reconnaissance_source', 'port_scanner'],
+    source: 'threat_intel',
+    first_seen: new Date(Date.now() - 43200000).toISOString(),
+    last_seen: new Date().toISOString(),
+    raw_response: { feed: 'sentinelx_curated_ioc' },
+    created_at: new Date(Date.now() - 43200000).toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: 3,
+    indicator: '203.0.113.15',
+    indicator_type: 'ipv4',
+    provider: 'consensus',
+    providers_reporting: ['virustotal', 'internal'],
+    reputation: 'malicious',
+    confidence: 88,
+    severity: 'HIGH',
+    tags: ['web_attack_source', 'sqli_probe', 'initial_access'],
+    source: 'threat_intel',
+    first_seen: new Date(Date.now() - 172800000).toISOString(),
+    last_seen: new Date().toISOString(),
+    raw_response: { malicious_engines: 14, total_engines: 89 },
+    created_at: new Date(Date.now() - 172800000).toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: 4,
+    indicator: '198.51.100.23',
+    indicator_type: 'ipv4',
+    provider: 'internal',
+    providers_reporting: ['internal'],
+    reputation: 'malicious',
+    confidence: 90,
+    severity: 'HIGH',
+    tags: ['known_scanner', 'ssh_bruteforce', 'rfc5737_lab_adversary'],
+    source: 'threat_intel',
+    first_seen: new Date(Date.now() - 600000).toISOString(),
+    last_seen: new Date().toISOString(),
+    raw_response: { feed: 'sentinelx_curated_ioc' },
+    created_at: new Date(Date.now() - 600000).toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: 5,
+    indicator: '192.0.2.200',
+    indicator_type: 'ipv4',
+    provider: 'internal',
+    providers_reporting: ['internal'],
+    reputation: 'malicious',
+    confidence: 95,
+    severity: 'CRITICAL',
+    tags: ['syn_flood_origin', 'ddos_botnet', 'impact'],
+    source: 'threat_intel',
+    first_seen: new Date(Date.now() - 200000).toISOString(),
+    last_seen: new Date().toISOString(),
+    raw_response: { feed: 'sentinelx_curated_ioc' },
+    created_at: new Date(Date.now() - 200000).toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: 6,
+    indicator: '10.0.0.10',
+    indicator_type: 'ipv4',
+    provider: 'internal',
+    providers_reporting: ['internal'],
+    reputation: 'clean',
+    confidence: 100,
+    severity: 'INFORMATIONAL',
+    tags: ['rfc1918_private', 'internal_trusted'],
+    source: 'threat_intel',
+    first_seen: new Date(Date.now() - 864000000).toISOString(),
+    last_seen: new Date().toISOString(),
+    raw_response: { scope: 'private_network' },
+    created_at: new Date(Date.now() - 864000000).toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+];
+
+// Phase 5 Threat Intelligence APIs
+app.get('/api/v1/threat-intel/providers', (_req: Request, res: Response) => {
+  const vtKey = process.env.VIRUSTOTAL_API_KEY || '';
+  const abuseKey = process.env.ABUSEIPDB_API_KEY || '';
+  const otxKey = process.env.OTX_API_KEY || process.env.ALIENVAULT_OTX_KEY || '';
+
+  res.json({
+    providers: [
+      {
+        name: 'virustotal',
+        configured: Boolean(vtKey && vtKey.trim()),
+        available: Boolean(vtKey && vtKey.trim()),
+        supported_types: ['ipv4', 'domain', 'url', 'hash'],
+        rate_limited: false,
+      },
+      {
+        name: 'abuseipdb',
+        configured: Boolean(abuseKey && abuseKey.trim()),
+        available: Boolean(abuseKey && abuseKey.trim()),
+        supported_types: ['ipv4', 'ipv6'],
+        rate_limited: false,
+      },
+      {
+        name: 'alienvault_otx',
+        configured: Boolean(otxKey && otxKey.trim()),
+        available: Boolean(otxKey && otxKey.trim()),
+        supported_types: ['ipv4', 'ipv6', 'domain', 'url', 'hash'],
+        rate_limited: false,
+      },
+      {
+        name: 'internal',
+        configured: true,
+        available: true,
+        supported_types: ['ipv4', 'ipv6', 'domain', 'url', 'hash'],
+        rate_limited: false,
+      },
+    ],
+  });
+});
+
+app.post('/api/v1/threat-intel/enrich', (req: Request, res: Response) => {
+  const { indicator, indicator_type } = req.body || {};
+  if (!indicator || typeof indicator !== 'string') {
+    return res.status(400).json({ detail: 'Indicator is required' });
+  }
+
+  const clean = indicator.trim().toLowerCase();
+  const existing = mockThreatIntelRecords.find(r => r.indicator.toLowerCase() === clean);
+
+  if (existing) {
+    existing.last_seen = new Date().toISOString();
+    return res.json(existing);
+  }
+
+  // Determine type
+  let indType = indicator_type || 'ipv4';
+  if (clean.includes('/') || clean.startsWith('http')) indType = 'url';
+  else if (clean.length === 32 || clean.length === 40 || clean.length === 64) indType = 'hash';
+  else if (clean.includes('.') && !/^\d+\.\d+\.\d+\.\d+$/.test(clean)) indType = 'domain';
+
+  const isPrivate = clean.startsWith('10.') || clean.startsWith('192.168.') || clean.startsWith('172.16.') || clean === '127.0.0.1';
+  const newRecord: MockThreatIntelRecord = {
+    id: mockThreatIntelRecords.length + 1,
+    indicator: indicator.trim(),
+    indicator_type: indType as any,
+    provider: 'internal',
+    providers_reporting: ['internal'],
+    reputation: isPrivate ? 'clean' : (clean.includes('malware') || clean.includes('bad') ? 'malicious' : 'unknown'),
+    confidence: isPrivate ? 100 : (clean.includes('malware') ? 90 : 20),
+    severity: isPrivate ? 'INFORMATIONAL' : (clean.includes('malware') ? 'HIGH' : 'LOW'),
+    tags: isPrivate ? ['rfc1918_private'] : ['on_demand_lookup'],
+    source: 'threat_intel',
+    first_seen: new Date().toISOString(),
+    last_seen: new Date().toISOString(),
+    raw_response: { method: 'on_demand_enrichment' },
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  mockThreatIntelRecords.unshift(newRecord);
+  res.json(newRecord);
+});
+
+app.get('/api/v1/threat-intel/indicators', (req: Request, res: Response) => {
+  const { reputation, indicator_type, search } = req.query;
+  let filtered = [...mockThreatIntelRecords];
+
+  if (reputation && reputation !== 'ALL') {
+    filtered = filtered.filter(r => r.reputation.toLowerCase() === (reputation as string).toLowerCase());
+  }
+  if (indicator_type && indicator_type !== 'ALL') {
+    filtered = filtered.filter(r => r.indicator_type.toLowerCase() === (indicator_type as string).toLowerCase());
+  }
+  if (search) {
+    const q = (search as string).toLowerCase();
+    filtered = filtered.filter(r =>
+      r.indicator.toLowerCase().includes(q) ||
+      r.tags.some(t => t.toLowerCase().includes(q))
+    );
+  }
+
+  res.json(filtered);
+});
+
+app.get('/api/v1/threat-intel/indicators/:indicator', (req: Request, res: Response) => {
+  const clean = req.params.indicator.trim().toLowerCase();
+  const found = mockThreatIntelRecords.find(r => r.indicator.toLowerCase() === clean);
+  if (found) return res.json(found);
+
+  // Return fallback unknown record
+  res.json({
+    indicator: req.params.indicator,
+    indicator_type: 'ipv4',
+    provider: 'internal',
+    providers_reporting: ['internal'],
+    reputation: 'unknown',
+    confidence: 0,
+    severity: 'LOW',
+    tags: ['unclassified'],
+    first_seen: new Date().toISOString(),
+    last_seen: new Date().toISOString(),
+    source: 'threat_intel',
+  });
+});
+
+app.get('/api/v1/threat-intel/indicators/:indicator/related-alerts', (req: Request, res: Response) => {
+  const clean = req.params.indicator.trim();
+  const alerts = mockAlerts.filter(a =>
+    a.source_ip === clean ||
+    a.destination_ip === clean ||
+    a.description.includes(clean)
+  );
+  res.json(alerts);
+});
+
+app.get('/api/v1/threat-intel/indicators/:indicator/related-incidents', (req: Request, res: Response) => {
+  const clean = req.params.indicator.trim();
+  const alertIncidentIds = mockAlerts
+    .filter(a => a.source_ip === clean || a.destination_ip === clean || a.description.includes(clean))
+    .map(a => a.incident_id)
+    .filter(Boolean);
+
+  const incidents = mockIncidents.filter(i =>
+    alertIncidentIds.includes(i.id) || i.description.includes(clean)
+  );
+  res.json(incidents);
+});
+
+// -----------------------------------------------------------------------------
+// Phase 6: Endpoint Collectors & Windows Telemetry Mock Routes
+// -----------------------------------------------------------------------------
+interface MockCollector {
+  id: number;
+  collector_id: string;
+  name: string;
+  hostname: string;
+  ip_address: string;
+  operating_system: string;
+  agent_version: string;
+  status: 'ONLINE' | 'DEGRADED' | 'OFFLINE';
+  registered_at: string;
+  last_seen: string;
+  event_count: number;
+  alert_count: number;
+  metadata_json?: any;
+}
+
+const mockCollectors: MockCollector[] = [
+  {
+    id: 1,
+    collector_id: 'win-dc-01',
+    name: 'Primary Domain Controller',
+    hostname: 'WIN-DC01.CORP.LOCAL',
+    ip_address: '10.0.0.10',
+    operating_system: 'Windows Server 2022 Datacenter',
+    agent_version: '1.0.0',
+    status: 'ONLINE',
+    registered_at: new Date(Date.now() - 86400000).toISOString(),
+    last_seen: new Date().toISOString(),
+    event_count: 1420,
+    alert_count: 3,
+    metadata_json: { role: 'Domain Controller', cpu_cores: 8, memory_gb: 32 },
+  },
+  {
+    id: 2,
+    collector_id: 'win-wrk-89',
+    name: 'Executive Workstation 89',
+    hostname: 'WIN11-EXEC-89',
+    ip_address: '10.0.0.89',
+    operating_system: 'Windows 11 Enterprise (23H2)',
+    agent_version: '1.0.0',
+    status: 'ONLINE',
+    registered_at: new Date(Date.now() - 43200000).toISOString(),
+    last_seen: new Date(Date.now() - 15000).toISOString(),
+    event_count: 512,
+    alert_count: 1,
+    metadata_json: { role: 'Workstation', cpu_cores: 16, memory_gb: 64 },
+  },
+];
+
+app.get('/api/v1/collectors', (req: Request, res: Response) => {
+  const { status } = req.query;
+  let list = [...mockCollectors];
+  if (status && status !== 'ALL') {
+    list = list.filter(c => c.status === (status as string).toUpperCase());
+  }
+  res.json(list);
+});
+
+app.get('/api/v1/collectors/:collector_id', (req: Request, res: Response) => {
+  const c = mockCollectors.find(col => col.collector_id === req.params.collector_id);
+  if (!c) return res.status(404).json({ detail: 'Collector not found' });
+
+  const recentEvents = mockEvents.filter(e => e.hostname === c.hostname).slice(0, 15);
+  const recentAlerts = mockAlerts.filter(a => a.description.includes(c.hostname) || a.source_ip === c.ip_address).slice(0, 10);
+
+  res.json({
+    ...c,
+    recent_events: recentEvents,
+    recent_alerts: recentAlerts,
+  });
+});
+
+app.post('/api/v1/collectors/register', (req: Request, res: Response) => {
+  const { name, hostname, ip_address, operating_system, agent_version } = req.body || {};
+  if (!name || !hostname) {
+    return res.status(400).json({ detail: 'Name and hostname are required.' });
+  }
+
+  const newId = `win-${Math.random().toString(36).substring(2, 10)}`;
+  const apiKey = `snx_col_${Math.random().toString(36).substring(2)}${Math.random().toString(36).substring(2)}`;
+
+  const newCol: MockCollector = {
+    id: mockCollectors.length + 1,
+    collector_id: newId,
+    name: name.trim(),
+    hostname: hostname.trim().toUpperCase(),
+    ip_address: ip_address || '10.0.0.100',
+    operating_system: operating_system || 'Windows 11',
+    agent_version: agent_version || '1.0.0',
+    status: 'ONLINE',
+    registered_at: new Date().toISOString(),
+    last_seen: new Date().toISOString(),
+    event_count: 0,
+    alert_count: 0,
+    metadata_json: req.body.metadata_json || {},
+  };
+
+  mockCollectors.unshift(newCol);
+
+  res.status(201).json({
+    collector_id: newCol.collector_id,
+    api_key: apiKey,
+    name: newCol.name,
+    hostname: newCol.hostname,
+    operating_system: newCol.operating_system,
+    registered_at: newCol.registered_at,
+    status: newCol.status,
+    instructions: `Collector registered. Configure SENTINELX_COLLECTOR_ID=${newId} and SENTINELX_API_KEY=${apiKey} on Windows agent.`,
+  });
+});
+
+app.post('/api/v1/collectors/:collector_id/heartbeat', (req: Request, res: Response) => {
+  const c = mockCollectors.find(col => col.collector_id === req.params.collector_id);
+  if (!c) return res.status(404).json({ detail: 'Collector not found' });
+
+  c.last_seen = new Date().toISOString();
+  c.status = 'ONLINE';
+  if (req.body.hostname) c.hostname = req.body.hostname;
+  if (req.body.agent_version) c.agent_version = req.body.agent_version;
+
+  res.json({
+    collector_id: c.collector_id,
+    status: c.status,
+    last_seen: c.last_seen,
+    server_time: new Date().toISOString(),
+    next_heartbeat_seconds: 30,
+  });
+});
+
+app.delete('/api/v1/collectors/:collector_id', (req: Request, res: Response) => {
+  const idx = mockCollectors.findIndex(col => col.collector_id === req.params.collector_id);
+  if (idx === -1) return res.status(404).json({ detail: 'Collector not found' });
+
+  mockCollectors.splice(idx, 1);
+  res.status(204).send();
+});
+
+// Alias for /api/v1/events/ingest
+app.post('/api/v1/events/ingest', (req: Request, res: Response) => {
+  const collectorId = req.headers['x-collector-id'] as string;
+  if (collectorId) {
+    const c = mockCollectors.find(col => col.collector_id === collectorId);
+    if (c) {
+      c.event_count += 1;
+      c.last_seen = new Date().toISOString();
+      c.status = 'ONLINE';
+    }
+  }
+
+  // Delegate to existing event ingestion logic
+  const payload = req.body;
+  const newEventId = `evt_${Math.random().toString(36).substring(2, 10)}`;
+  const newEvent: MockEvent = {
+    id: mockEvents.length + 1,
+    event_id: payload.event_id || newEventId,
+    timestamp: payload.timestamp || new Date().toISOString(),
+    source: payload.source || 'windows_collector',
+    source_ip: payload.source_ip,
+    destination_ip: payload.destination_ip,
+    source_port: payload.source_port,
+    destination_port: payload.destination_port,
+    protocol: payload.protocol || 'TCP',
+    event_type: payload.event_type || 'windows_security',
+    severity: payload.severity || 'LOW',
+    username: payload.username,
+    hostname: payload.hostname || 'WIN-ENDPOINT',
+    process_name: payload.process_name,
+    command_line: payload.command_line,
+    message: payload.message || 'Windows Telemetry Ingested',
+    mitre_technique: payload.mitre_technique,
+    status: 'PROCESSED',
+    created_at: new Date().toISOString(),
+  };
+
+  mockEvents.unshift(newEvent);
+
+  // Check if detection rules trigger
+  const alerts: any[] = [];
+  const msgLower = (payload.message || '').toLowerCase();
+  const cmdLower = (payload.command_line || '').toLowerCase();
+
+  if (payload.event_type === 'windows_failed_logon' || msgLower.includes('4625') || msgLower.includes('failed logon')) {
+    const alert = {
+      id: mockAlerts.length + 1,
+      event_id: newEvent.id,
+      title: `Windows Brute Force / Repeated Failed Logons on ${newEvent.hostname}`,
+      description: `Host ${newEvent.hostname} encountered consecutive failed logon events (Event ID 4625) for ${newEvent.username || 'Administrator'}.`,
+      severity: 'HIGH',
+      risk_score: 90,
+      status: 'NEW',
+      source_ip: newEvent.source_ip || '198.51.100.50',
+      destination_ip: newEvent.destination_ip || '10.0.0.10',
+      mitre_tactic: 'Credential Access',
+      mitre_technique: 'T1110.001',
+      threat_intel_context: {
+        indicator: newEvent.source_ip || '198.51.100.50',
+        indicator_type: 'ipv4',
+        provider: 'consensus',
+        reputation: 'malicious',
+        confidence: 92,
+        severity: 'HIGH',
+        tags: ['brute_force_botnet', 'credential_access'],
+      },
+      risk_adjustment_reason: 'Risk adjusted from 70 to 90 (+20 pts): Indicator evaluated as MALICIOUS.',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    mockAlerts.unshift(alert as any);
+    alerts.push(alert);
+    broadcastSSE({ type: 'new_alert', alert });
+  } else if (cmdLower.includes('vssadmin') && (cmdLower.includes('delete') || cmdLower.includes('shadows'))) {
+    const alert = {
+      id: mockAlerts.length + 1,
+      event_id: newEvent.id,
+      title: `Shadow Copy Deletion / Recovery Inhibition on ${newEvent.hostname}`,
+      description: `Host ${newEvent.hostname} executed command inhibiting volume shadow copies (vssadmin delete shadows).`,
+      severity: 'CRITICAL',
+      risk_score: 96,
+      status: 'NEW',
+      source_ip: newEvent.source_ip,
+      destination_ip: newEvent.destination_ip,
+      mitre_tactic: 'Impact',
+      mitre_technique: 'T1490',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    mockAlerts.unshift(alert as any);
+    alerts.push(alert);
+    broadcastSSE({ type: 'new_alert', alert });
+  } else if (msgLower.includes('defender') || payload.event_type === 'windows_defender') {
+    const alert = {
+      id: mockAlerts.length + 1,
+      event_id: newEvent.id,
+      title: `Windows Defender Threat Detected on ${newEvent.hostname}`,
+      description: `Windows Defender detected malware threat on ${newEvent.hostname}: ${newEvent.message}.`,
+      severity: 'HIGH',
+      risk_score: 88,
+      status: 'NEW',
+      source_ip: newEvent.source_ip,
+      destination_ip: newEvent.destination_ip,
+      mitre_tactic: 'Defense Evasion',
+      mitre_technique: 'T1562.001',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    mockAlerts.unshift(alert as any);
+    alerts.push(alert);
+    broadcastSSE({ type: 'new_alert', alert });
+  }
+
+  broadcastSSE({ type: 'new_event', event: newEvent });
+
+  res.status(201).json({
+    status: 'INGESTED',
+    ingested_count: 1,
+    event_ids: [newEvent.event_id],
+    generated_alerts: alerts,
+  });
+});
+
 
 
 async function startServer() {

@@ -14,6 +14,8 @@ _STATE_SSH_FAILURES: Dict[str, List[float]] = defaultdict(list)
 _STATE_AUTH_FAILURES: Dict[str, List[float]] = defaultdict(list)
 _STATE_HTTP_REQUESTS: Dict[str, List[float]] = defaultdict(list)
 _STATE_PACKET_BURSTS: Dict[str, List[float]] = defaultdict(list)
+_STATE_WIN_FAILED_LOGONS: Dict[str, List[float]] = defaultdict(list)
+_STATE_RECENT_FAILED_USERS: Dict[str, float] = {}
 
 
 class DetectionEngine:
@@ -304,6 +306,281 @@ class DetectionEngine:
                 "status": "NEW",
             })
 
+        # ----------------------------------------------------------------------
+        # 10. Windows Repeated Failed Authentication (Event ID 4625, T1110.001)
+        # Threshold: >= 3 failed logons on a Windows host/account within 60s
+        # ----------------------------------------------------------------------
+        is_win_failed_logon = (
+            event_type in ("windows_failed_logon", "windows_security", "failed_logon", "windows_security_log")
+            and ("4625" in msg or "4625" in str(event.get("metadata", {}).get("event_id", "")) or "failed logon" in msg.lower() or "logon failure" in msg.lower())
+        ) or event_type == "windows_failed_logon"
+
+        if is_win_failed_logon:
+            key = f"{host}:{username or 'unknown'}"
+            fails = _STATE_WIN_FAILED_LOGONS[key]
+            fails = [ts for ts in fails if now - ts <= 60.0]
+            fails.append(now)
+            _STATE_WIN_FAILED_LOGONS[key] = fails
+            _STATE_RECENT_FAILED_USERS[key] = now
+
+            if len(fails) >= 3:
+                mitre_info = lookup_mitre("T1110.001") or {}
+                score, sev, _ = RiskScoringEngine.score_detection(
+                    severity="HIGH",
+                    confidence=90,
+                    event_count=len(fails),
+                    asset_criticality="medium",
+                    user_is_privileged=(username in ["administrator", "admin", "system"]),
+                    mitre_tactic=mitre_info.get("tactic", "Credential Access"),
+                )
+                alerts.append({
+                    "title": f"Windows Brute Force / Repeated Failed Logons on {host} ({username})",
+                    "description": f"Host {host} encountered {len(fails)} consecutive failed logon events (Event ID 4625) for account '{username}' within 60s.",
+                    "severity": sev,
+                    "risk_score": score,
+                    "source_ip": src_ip,
+                    "destination_ip": dst_ip,
+                    "mitre_technique": "T1110.001",
+                    "mitre_tactic": mitre_info.get("tactic", "Credential Access"),
+                    "rule_category": "authentication",
+                    "status": "NEW",
+                })
+
+        # ----------------------------------------------------------------------
+        # 11. Windows Successful Logon After Multiple Failures (Event ID 4624, T1078)
+        # ----------------------------------------------------------------------
+        is_win_success_logon = (
+            event_type in ("windows_successful_logon", "windows_security", "successful_logon", "windows_security_log")
+            and ("4624" in msg or "4624" in str(event.get("metadata", {}).get("event_id", "")) or "successful logon" in msg.lower())
+        ) or event_type == "windows_successful_logon"
+
+        if is_win_success_logon:
+            key = f"{host}:{username or 'unknown'}"
+            last_fail_ts = _STATE_RECENT_FAILED_USERS.get(key, 0)
+            if now - last_fail_ts <= 120.0 and len(_STATE_WIN_FAILED_LOGONS.get(key, [])) >= 2:
+                mitre_info = lookup_mitre("T1078") or {}
+                score, sev, _ = RiskScoringEngine.score_detection(
+                    severity="HIGH",
+                    confidence=85,
+                    event_count=1,
+                    asset_criticality="high",
+                    user_is_privileged=(username in ["administrator", "admin"]),
+                    mitre_tactic=mitre_info.get("tactic", "Initial Access"),
+                )
+                alerts.append({
+                    "title": f"Windows Successful Logon After Failures on {host} ({username})",
+                    "description": f"Account '{username}' successfully logged in (Event ID 4624) on {host} immediately following multiple authentication failures.",
+                    "severity": sev,
+                    "risk_score": score,
+                    "source_ip": src_ip,
+                    "destination_ip": dst_ip,
+                    "mitre_technique": "T1078",
+                    "mitre_tactic": mitre_info.get("tactic", "Initial Access"),
+                    "rule_category": "authentication",
+                    "status": "NEW",
+                })
+                # Reset failure state on success
+                _STATE_RECENT_FAILED_USERS.pop(key, None)
+
+        # ----------------------------------------------------------------------
+        # 12. Suspicious PowerShell ScriptBlock / Encoded Execution (Event ID 4104/4103, T1059.001)
+        # ----------------------------------------------------------------------
+        raw_cmd = f"{cmd} {msg}".lower()
+        has_ps_indicators = (
+            "4104" in msg
+            or "4103" in msg
+            or "powershell" in proc
+            or "powershell" in event_type
+            or event_type == "windows_powershell"
+        ) and any(
+            kw in raw_cmd
+            for kw in [
+                "downloadstring",
+                "iex ",
+                "invoke-expression",
+                "-enc ",
+                "-encodedcommand",
+                "executionpolicy bypass",
+                "bypass -noprofile",
+                "webclient",
+                "bitstransfer",
+            ]
+        )
+
+        if has_ps_indicators or event_type == "windows_powershell_suspicious":
+            mitre_info = lookup_mitre("T1059.001") or {}
+            score, sev, _ = RiskScoringEngine.score_detection(
+                severity="HIGH",
+                confidence=92,
+                event_count=1,
+                asset_criticality="high",
+                mitre_tactic=mitre_info.get("tactic", "Execution"),
+            )
+            alerts.append({
+                "title": f"Suspicious PowerShell Execution on {host}",
+                "description": f"PowerShell execution metadata on {host} indicates obfuscation or remote download cradle: '{cmd or msg[:120]}'.",
+                "severity": sev,
+                "risk_score": score,
+                "source_ip": src_ip,
+                "destination_ip": dst_ip,
+                "mitre_technique": "T1059.001",
+                "mitre_tactic": mitre_info.get("tactic", "Execution"),
+                "rule_category": "process",
+                "status": "NEW",
+            })
+
+        # ----------------------------------------------------------------------
+        # 13. Suspicious Windows Process Execution (Event ID 4688, T1059.003 / T1490 / T1003)
+        # ----------------------------------------------------------------------
+        if "vssadmin" in raw_cmd and ("delete" in raw_cmd or "shadows" in raw_cmd):
+            mitre_info = lookup_mitre("T1490") or {}
+            score, sev, _ = RiskScoringEngine.score_detection(
+                severity="CRITICAL",
+                confidence=95,
+                event_count=1,
+                asset_criticality="critical",
+                mitre_tactic=mitre_info.get("tactic", "Impact"),
+            )
+            alerts.append({
+                "title": f"Shadow Copy Deletion / Recovery Inhibition on {host}",
+                "description": f"Host {host} executed command inhibiting volume shadow copies (ransomware precursor): '{cmd or msg}'.",
+                "severity": sev,
+                "risk_score": score,
+                "source_ip": src_ip,
+                "destination_ip": dst_ip,
+                "mitre_technique": "T1490",
+                "mitre_tactic": mitre_info.get("tactic", "Impact"),
+                "rule_category": "process",
+                "status": "NEW",
+            })
+        elif "certutil" in raw_cmd and ("-urlcache" in raw_cmd or "-split" in raw_cmd or "http" in raw_cmd):
+            mitre_info = lookup_mitre("T1059.003") or {}
+            score, sev, _ = RiskScoringEngine.score_detection(
+                severity="HIGH",
+                confidence=90,
+                event_count=1,
+                asset_criticality="medium",
+                mitre_tactic=mitre_info.get("tactic", "Execution"),
+            )
+            alerts.append({
+                "title": f"Suspicious CertUtil Ingress Download on {host}",
+                "description": f"Host {host} invoked certutil for external payload retrieval: '{cmd or msg}'.",
+                "severity": sev,
+                "risk_score": score,
+                "source_ip": src_ip,
+                "destination_ip": dst_ip,
+                "mitre_technique": "T1059.003",
+                "mitre_tactic": mitre_info.get("tactic", "Execution"),
+                "rule_category": "process",
+                "status": "NEW",
+            })
+        elif "whoami /priv" in raw_cmd or "nltest /dclist" in raw_cmd:
+            mitre_info = lookup_mitre("T1059.003") or {}
+            score, sev, _ = RiskScoringEngine.score_detection(
+                severity="MEDIUM",
+                confidence=80,
+                event_count=1,
+                asset_criticality="medium",
+                mitre_tactic=mitre_info.get("tactic", "Discovery"),
+            )
+            alerts.append({
+                "title": f"Adversarial Privilege/Domain Reconnaissance on {host}",
+                "description": f"Host {host} executed enumeration utility: '{cmd or msg}'.",
+                "severity": sev,
+                "risk_score": score,
+                "source_ip": src_ip,
+                "destination_ip": dst_ip,
+                "mitre_technique": "T1059.003",
+                "mitre_tactic": "Discovery",
+                "rule_category": "process",
+                "status": "NEW",
+            })
+
+        # ----------------------------------------------------------------------
+        # 14. Windows Defender Threat Detection or Tampering (Event ID 1116/1117/5001, T1562.001)
+        # ----------------------------------------------------------------------
+        is_defender_event = (
+            "defender" in event_type
+            or "1116" in msg
+            or "1117" in msg
+            or "5001" in msg
+            or event_type == "windows_defender"
+            or "defender" in msg.lower()
+        )
+        if is_defender_event:
+            mitre_info = lookup_mitre("T1562.001") or {}
+            is_tamper = "disabled" in msg.lower() or "5001" in msg or "tamper" in msg.lower()
+            score, sev, _ = RiskScoringEngine.score_detection(
+                severity="CRITICAL" if is_tamper else "HIGH",
+                confidence=95,
+                event_count=1,
+                asset_criticality="high",
+                mitre_tactic=mitre_info.get("tactic", "Defense Evasion"),
+            )
+            alerts.append({
+                "title": f"Windows Defender Security Alert on {host}: {'Tampering Detected' if is_tamper else 'Malware Quarantined'}",
+                "description": f"Windows Defender on {host} generated security signal: {msg}.",
+                "severity": sev,
+                "risk_score": score,
+                "source_ip": src_ip,
+                "destination_ip": dst_ip,
+                "mitre_technique": "T1562.001",
+                "mitre_tactic": mitre_info.get("tactic", "Defense Evasion"),
+                "rule_category": "system",
+                "status": "NEW",
+            })
+
+        # ----------------------------------------------------------------------
+        # 15. Unexpected Privileged Account Activity (Event ID 4672, T1078.002)
+        # ----------------------------------------------------------------------
+        if "4672" in msg or event_type == "windows_privileged_logon":
+            mitre_info = lookup_mitre("T1078.002") or {}
+            score, sev, _ = RiskScoringEngine.score_detection(
+                severity="MEDIUM",
+                confidence=80,
+                event_count=1,
+                asset_criticality="high",
+                user_is_privileged=True,
+                mitre_tactic=mitre_info.get("tactic", "Defense Evasion"),
+            )
+            alerts.append({
+                "title": f"Special Privileges Assigned to Account '{username}' on {host}",
+                "description": f"Host {host} assigned administrator / special privileges (Event ID 4672) to user '{username}'.",
+                "severity": sev,
+                "risk_score": score,
+                "source_ip": src_ip,
+                "destination_ip": dst_ip,
+                "mitre_technique": "T1078.002",
+                "mitre_tactic": mitre_info.get("tactic", "Defense Evasion"),
+                "rule_category": "authentication",
+                "status": "NEW",
+            })
+
+        # ----------------------------------------------------------------------
+        # 16. Suspicious Windows Network Outbound Connection (Event ID 5156, T1071)
+        # ----------------------------------------------------------------------
+        if ("5156" in msg or event_type == "windows_network") and dst_port in (4444, 1337, 8888, 31337, 6667):
+            mitre_info = lookup_mitre("T1071") or {}
+            score, sev, _ = RiskScoringEngine.score_detection(
+                severity="HIGH",
+                confidence=90,
+                event_count=1,
+                asset_criticality="high",
+                mitre_tactic=mitre_info.get("tactic", "Command and Control"),
+            )
+            alerts.append({
+                "title": f"Suspicious Outbound Network Connection from {host} to {dst_ip}:{dst_port}",
+                "description": f"Host {host} established outbound connection to high-risk destination port {dst_port} ({dst_ip}).",
+                "severity": sev,
+                "risk_score": score,
+                "source_ip": src_ip,
+                "destination_ip": dst_ip,
+                "mitre_technique": "T1071",
+                "mitre_tactic": mitre_info.get("tactic", "Command and Control"),
+                "rule_category": "network",
+                "status": "NEW",
+            })
+
         return alerts
 
     @classmethod
@@ -314,3 +591,6 @@ class DetectionEngine:
         _STATE_AUTH_FAILURES.clear()
         _STATE_HTTP_REQUESTS.clear()
         _STATE_PACKET_BURSTS.clear()
+        _STATE_WIN_FAILED_LOGONS.clear()
+        _STATE_RECENT_FAILED_USERS.clear()
+

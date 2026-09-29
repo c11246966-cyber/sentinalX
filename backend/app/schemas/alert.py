@@ -21,6 +21,8 @@ class AlertBase(BaseModel):
     mitre_tactic: Optional[str] = None
     mitre_technique: Optional[str] = None
     analyst_notes: Optional[str] = None
+    threat_intel_context: Optional[Dict[str, Any]] = None
+    risk_adjustment_reason: Optional[str] = None
 
 
 class AlertCreate(AlertBase):

@@ -116,6 +116,8 @@ async def get_alert(
         "mitre_technique": alert.mitre_technique,
         "mitre_details": mitre_info,
         "analyst_notes": alert.analyst_notes,
+        "threat_intel_context": alert.threat_intel_context,
+        "risk_adjustment_reason": alert.risk_adjustment_reason,
         "incident_id": alert.incident_id,
         "created_at": alert.created_at.isoformat(),
         "updated_at": alert.updated_at.isoformat(),
