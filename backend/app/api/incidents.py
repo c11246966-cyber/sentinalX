@@ -205,19 +205,16 @@ async def create_incident(
         source_ip=client_ip,
     )
 
-    # Broadcast real-time
-    await manager.broadcast({
-        "type": "new_incident",
-        "incident": {
-            "id": incident.id,
-            "title": incident.title,
-            "severity": incident.severity,
-            "risk_score": incident.risk_score,
-            "status": incident.status,
-            "assigned_to": incident.assigned_to,
-            "created_at": incident.created_at.isoformat(),
-        },
-    })
+    # Broadcast real-time (Phase 7 structured incident.created)
+    await manager.broadcast_incident({
+        "id": incident.id,
+        "title": incident.title,
+        "severity": incident.severity,
+        "risk_score": incident.risk_score,
+        "status": incident.status,
+        "assigned_to": incident.assigned_to,
+        "created_at": incident.created_at.isoformat(),
+    }, is_new=True)
 
     return IncidentResponse(
         id=incident.id,
@@ -287,20 +284,27 @@ async def update_incident(
         source_ip=client_ip,
     )
 
-    # Broadcast real-time
-    await manager.broadcast({
-        "type": "incident_updated",
-        "incident": {
-            "id": incident.id,
-            "title": incident.title,
-            "severity": incident.severity,
+    # Broadcast real-time (Phase 7 structured incident.updated)
+    await manager.broadcast_incident({
+        "id": incident.id,
+        "title": incident.title,
+        "severity": incident.severity,
+        "risk_score": incident.risk_score,
+        "status": incident.status,
+        "assigned_to": incident.assigned_to,
+        "analyst_notes": incident.analyst_notes,
+        "updated_at": incident.updated_at.isoformat(),
+    }, is_new=False)
+
+    # Real-time risk-score update broadcast if risk score was modified
+    if incident_update.risk_score is not None:
+        await manager.broadcast_risk_update({
+            "entity_type": "incident",
+            "entity_id": incident.id,
             "risk_score": incident.risk_score,
-            "status": incident.status,
-            "assigned_to": incident.assigned_to,
-            "analyst_notes": incident.analyst_notes,
+            "title": incident.title,
             "updated_at": incident.updated_at.isoformat(),
-        },
-    })
+        })
 
     # Count linked alerts
     c_res = await db.execute(select(func.count(Alert.id)).where(Alert.incident_id == incident.id))

@@ -11,6 +11,10 @@ import {
   Collector,
   CollectorRegisterPayload,
   CollectorRegisterResponse,
+  Host,
+  HostCreatePayload,
+  HostUpdatePayload,
+  HostIsolationPayload,
 } from '../types';
 
 const API_BASE = '/api/v1';
@@ -333,5 +337,81 @@ export async function simulateWindowsTelemetryEvent(event: any): Promise<any> {
   if (!res.ok) throw new Error(`Failed to ingest synthetic telemetry: ${res.statusText}`);
   return res.json();
 }
+
+// -----------------------------------------------------------------------------
+// Phase 6: Host Inventory & Endpoint Monitoring API Services
+// -----------------------------------------------------------------------------
+export async function fetchHosts(filters?: { status?: string; os?: string; search?: string }): Promise<Host[]> {
+  const params = new URLSearchParams();
+  if (filters?.status && filters.status !== 'ALL') params.append('status', filters.status);
+  if (filters?.os && filters.os !== 'ALL') params.append('os', filters.os);
+  if (filters?.search) params.append('search', filters.search);
+
+  const qs = params.toString();
+  const url = qs ? `${API_BASE}/hosts?${qs}` : `${API_BASE}/hosts`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch host inventory: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchHostById(hostId: number): Promise<Host> {
+  const res = await fetch(`${API_BASE}/hosts/${hostId}`);
+  if (!res.ok) throw new Error(`Failed to fetch host detail: ${res.statusText}`);
+  return res.json();
+}
+
+export async function registerHost(payload: HostCreatePayload): Promise<Host> {
+  const res = await fetch(`${API_BASE}/hosts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Host registration failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function updateHost(hostId: number, payload: HostUpdatePayload): Promise<Host> {
+  const res = await fetch(`${API_BASE}/hosts/${hostId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`Failed to update host: ${res.statusText}`);
+  return res.json();
+}
+
+export async function sendHostHeartbeat(
+  hostId: number,
+  payload: { status?: string; agent_version?: string }
+): Promise<Host> {
+  const res = await fetch(`${API_BASE}/hosts/${hostId}/heartbeat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`Failed to update host heartbeat: ${res.statusText}`);
+  return res.json();
+}
+
+export async function isolateHost(hostId: number, payload: HostIsolationPayload): Promise<Host> {
+  const res = await fetch(`${API_BASE}/hosts/${hostId}/isolate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`Failed to execute isolation: ${res.statusText}`);
+  return res.json();
+}
+
+export async function deleteHost(hostId: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/hosts/${hostId}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok && res.status !== 204) throw new Error(`Failed to delete host: ${res.statusText}`);
+}
+
 
 

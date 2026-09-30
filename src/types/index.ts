@@ -222,3 +222,42 @@ export interface CollectorRegisterResponse {
   instructions: string;
 }
 
+export type HostStatus = 'ONLINE' | 'OFFLINE' | 'DEGRADED' | 'ISOLATED';
+
+export interface Host {
+  id: number;
+  hostname: string;
+  ip_address: string;
+  operating_system: string;
+  agent_version: string;
+  status: HostStatus;
+  last_seen: string;
+  created_at: string;
+  event_count?: number;
+  alert_count?: number;
+  calculated_risk?: number;
+  recent_events?: SecurityEvent[];
+  recent_alerts?: Alert[];
+}
+
+export interface HostCreatePayload {
+  hostname: string;
+  ip_address: string;
+  operating_system: string;
+  agent_version?: string;
+  status?: string;
+}
+
+export interface HostUpdatePayload {
+  ip_address?: string;
+  operating_system?: string;
+  agent_version?: string;
+  status?: string;
+}
+
+export interface HostIsolationPayload {
+  isolate: boolean;
+  reason: string;
+}
+
+

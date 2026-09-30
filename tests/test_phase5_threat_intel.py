@@ -220,5 +220,77 @@ class TestPhase5ThreatIntelligence(unittest.TestCase):
             self.assertTrue(meta["rate_limited"])
 
 
+    def test_explicit_empty_string_keys_graceful_disable(self):
+        """Verify that VIRUSTOTAL_API_KEY='', ABUSEIPDB_API_KEY='', OTX_API_KEY='' are valid and disable providers."""
+        empty_env = {
+            "VIRUSTOTAL_API_KEY": "",
+            "ABUSEIPDB_API_KEY": "",
+            "OTX_API_KEY": "",
+            "ALIENVAULT_OTX_KEY": "",
+            "THREAT_INTEL_CACHE_TTL": "1800",
+            "THREAT_INTEL_TIMEOUT_S": "3.5",
+        }
+        with patch.dict("os.environ", empty_env, clear=True):
+            vt = VirusTotalProvider()
+            abuse = AbuseIPDBProvider()
+            otx = AlienVaultOTXProvider()
+            internal = InternalIntelProvider()
+
+            self.assertFalse(vt.is_configured())
+            self.assertFalse(vt.is_available())
+            self.assertEqual(vt.timeout, 3.5)
+
+            self.assertFalse(abuse.is_configured())
+            self.assertFalse(abuse.is_available())
+            self.assertEqual(abuse.timeout, 3.5)
+
+            self.assertFalse(otx.is_configured())
+            self.assertFalse(otx.is_available())
+            self.assertEqual(otx.timeout, 3.5)
+
+            self.assertTrue(internal.is_configured())
+            self.assertTrue(internal.is_available())
+
+            # Verify safe metadata reports configured=False without credentials
+            for p in (vt, abuse, otx):
+                meta = p.safe_metadata()
+                self.assertFalse(meta["configured"])
+                self.assertFalse(meta["available"])
+                self.assertNotIn("api_key", meta)
+                self.assertNotIn("key", meta)
+
+    def test_enrich_indicator_graceful_fallback_without_keys(self):
+        """Verify indicator enrichment uses internal feed fallback when all external keys are empty."""
+        empty_env = {
+            "VIRUSTOTAL_API_KEY": "",
+            "ABUSEIPDB_API_KEY": "",
+            "OTX_API_KEY": "",
+        }
+        with patch.dict("os.environ", empty_env, clear=True):
+            result = asyncio.run(
+                ThreatIntelManager.enrich_indicator("198.51.100.23", indicator_type="ipv4", force_refresh=True)
+            )
+            self.assertIsNotNone(result)
+            self.assertEqual(result["indicator"], "198.51.100.23")
+            self.assertEqual(result["reputation"], "malicious")
+            self.assertEqual(result["provider"], "internal")
+            self.assertIn("internal", result["providers_reporting"])
+            self.assertIn("known_scanner", result["tags"])
+
+    def test_cache_ttl_and_timeout_safe_defaults(self):
+        """Verify default TTL and timeout fallbacks."""
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(ThreatIntelCache.get_ttl(), 3600)
+
+            vt = VirusTotalProvider()
+            self.assertEqual(vt.timeout, 5.0)
+
+            abuse = AbuseIPDBProvider()
+            self.assertEqual(abuse.timeout, 5.0)
+
+            otx = AlienVaultOTXProvider()
+            self.assertEqual(otx.timeout, 5.0)
+
+
 if __name__ == "__main__":
     unittest.main()

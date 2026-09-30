@@ -7,6 +7,7 @@ import { IncidentManagement } from './pages/IncidentManagement';
 import { EventTelemetry } from './pages/EventTelemetry';
 import { DetectionRules } from './pages/DetectionRules';
 import { ThreatIntelligence } from './pages/ThreatIntelligence';
+import { HostInventory } from './pages/HostInventory';
 import { HealthChecker } from './components/HealthChecker';
 import { ArchitecturePipeline } from './components/ArchitecturePipeline';
 import { fetchHealthStatus } from './services/api';
@@ -75,6 +76,13 @@ export default function App() {
               onSelectAlert={handleSelectAlert}
               onSelectIncident={handleSelectIncident}
               onNavigateThreatIntel={handleNavigateThreatIntel}
+            />
+          )}
+
+          {activeTab === 'hosts' && (
+            <HostInventory
+              onNavigateThreatIntel={handleNavigateThreatIntel}
+              onNavigateTab={setActiveTab}
             />
           )}
 

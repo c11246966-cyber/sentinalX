@@ -58,10 +58,10 @@ export const EventTelemetry: React.FC = () => {
     }
   }, [eventTypeFilter, severityFilter, sourceIpFilter, destIpFilter, hostnameFilter, search]);
 
-  // Real-time listener for incoming events
+  // Real-time listener for incoming events via WebSocket
   useRealtime(
     useCallback((data: any) => {
-      if (['new_event', 'new_alert'].includes(data.type)) {
+      if (['event.created', 'alert.created', 'new_event', 'new_alert'].includes(data.type)) {
         loadEvents();
       }
     }, [loadEvents])

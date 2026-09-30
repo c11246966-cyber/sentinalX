@@ -171,18 +171,26 @@ async def update_alert_lifecycle(
         source_ip=client_ip,
     )
 
-    # Real-time WebSocket & SSE broadcast
-    await manager.broadcast({
-        "type": "alert_updated",
-        "alert": {
-            "id": alert.id,
-            "title": alert.title,
-            "status": alert.status,
-            "severity": alert.severity,
+    # Real-time WebSocket & SSE broadcast (Phase 7 alert.updated)
+    alert_payload = {
+        "id": alert.id,
+        "title": alert.title,
+        "status": alert.status,
+        "severity": alert.severity,
+        "risk_score": alert.risk_score,
+        "analyst_notes": alert.analyst_notes,
+        "updated_at": alert.updated_at.isoformat(),
+    }
+    await manager.broadcast_alert(alert_payload, is_new=False)
+
+    # Real-time risk-score update broadcast if risk score was modified
+    if update_data.risk_score is not None:
+        await manager.broadcast_risk_update({
+            "entity_type": "alert",
+            "entity_id": alert.id,
             "risk_score": alert.risk_score,
-            "analyst_notes": alert.analyst_notes,
+            "title": alert.title,
             "updated_at": alert.updated_at.isoformat(),
-        },
-    })
+        })
 
     return alert

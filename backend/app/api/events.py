@@ -192,11 +192,8 @@ async def ingest_event(
         }
         generated_alert_dicts.append(alert_dict)
 
-        # Broadcast new alert real-time
-        await manager.broadcast({
-            "type": "new_alert",
-            "alert": alert_dict,
-        })
+        # Broadcast new alert real-time (Phase 7 structured alert.created)
+        await manager.broadcast_alert(alert_dict, is_new=True)
 
         # 3. Multi-event correlation engine evaluation
         incident_candidate = correlation_engine.add_alert(alert_dict)
@@ -218,32 +215,26 @@ async def ingest_event(
             db_alert.incident_id = db_incident.id
             await db.commit()
 
-            # Broadcast new incident real-time
-            await manager.broadcast({
-                "type": "new_incident",
-                "incident": {
-                    "id": db_incident.id,
-                    "title": db_incident.title,
-                    "severity": db_incident.severity,
-                    "risk_score": db_incident.risk_score,
-                    "status": db_incident.status,
-                    "created_at": db_incident.created_at.isoformat(),
-                },
-            })
+            # Broadcast new incident real-time (Phase 7 structured incident.created)
+            await manager.broadcast_incident({
+                "id": db_incident.id,
+                "title": db_incident.title,
+                "severity": db_incident.severity,
+                "risk_score": db_incident.risk_score,
+                "status": db_incident.status,
+                "created_at": db_incident.created_at.isoformat(),
+            }, is_new=True)
 
-    # Broadcast event real-time
-    await manager.broadcast({
-        "type": "new_event",
-        "event": {
-            "id": db_event.id,
-            "event_id": db_event.event_id,
-            "timestamp": db_event.timestamp.isoformat(),
-            "event_type": db_event.event_type,
-            "severity": db_event.severity,
-            "source_ip": db_event.source_ip,
-            "destination_ip": db_event.destination_ip,
-            "message": db_event.message,
-        },
+    # Broadcast event real-time (Phase 7 structured event.created)
+    await manager.broadcast_event({
+        "id": db_event.id,
+        "event_id": db_event.event_id,
+        "timestamp": db_event.timestamp.isoformat(),
+        "event_type": db_event.event_type,
+        "severity": db_event.severity,
+        "source_ip": db_event.source_ip,
+        "destination_ip": db_event.destination_ip,
+        "message": db_event.message,
     })
 
     return EventIngestResponse(

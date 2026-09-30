@@ -51,11 +51,24 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     }
   }, []);
 
-  // Listen to real-time events via SSE
+  // Listen to real-time events via WebSocket
   const { status: realtimeStatus, reconnect } = useRealtime(
     useCallback((data: any) => {
       // Whenever a new alert, incident, or update arrives, re-fetch stats
-      if (['new_alert', 'alert_updated', 'new_incident', 'incident_updated', 'new_event'].includes(data.type)) {
+      if ([
+        'alert.created',
+        'alert.updated',
+        'incident.created',
+        'incident.updated',
+        'event.created',
+        'host.status',
+        'risk.updated',
+        'new_alert',
+        'alert_updated',
+        'new_incident',
+        'incident_updated',
+        'new_event',
+      ].includes(data.type)) {
         loadStats();
       }
     }, [loadStats])

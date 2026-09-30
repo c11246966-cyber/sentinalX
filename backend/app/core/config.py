@@ -134,12 +134,14 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     # External Threat Intel Keys (Optional - gracefully disabled when empty)
-    VIRUSTOTAL_API_KEY: Optional[str] = None
-    ABUSEIPDB_API_KEY: Optional[str] = None
-    ALIENVAULT_OTX_KEY: Optional[str] = None
-    OTX_API_KEY: Optional[str] = None
+    VIRUSTOTAL_API_KEY: str = ""
+    ABUSEIPDB_API_KEY: str = ""
+    ALIENVAULT_OTX_KEY: str = ""
+    OTX_API_KEY: str = ""
+    THREAT_INTEL_CACHE_TTL: int = 3600
     THREAT_INTEL_CACHE_TTL_SECONDS: int = 3600
-    THREAT_INTEL_TIMEOUT_SECONDS: int = 5
+    THREAT_INTEL_TIMEOUT_S: float = 5.0
+    THREAT_INTEL_TIMEOUT_SECONDS: float = 5.0
 
 
 # Global singleton settings instance

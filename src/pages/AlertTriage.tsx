@@ -68,13 +68,14 @@ export const AlertTriage: React.FC<AlertTriageProps> = ({
     }
   }, [statusFilter, severityFilter, sourceFilter, mitreFilter]);
 
-  // Real-time updates
+  // Real-time updates via WebSocket
   useRealtime(
     useCallback((data: any) => {
-      if (['new_alert', 'alert_updated'].includes(data.type)) {
+      if (['alert.created', 'alert.updated', 'new_alert', 'alert_updated'].includes(data.type)) {
         loadAlerts();
-        if (selectedAlert && data.alert && data.alert.id === selectedAlert.id) {
-          setSelectedAlert((prev) => (prev ? { ...prev, ...data.alert } : null));
+        const alertObj = data.alert || data.data;
+        if (selectedAlert && alertObj && alertObj.id === selectedAlert.id) {
+          setSelectedAlert((prev) => (prev ? { ...prev, ...alertObj } : null));
         }
       }
     }, [loadAlerts, selectedAlert])

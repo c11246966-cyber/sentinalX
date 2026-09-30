@@ -26,6 +26,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onSelectTab }) => {
       title: 'SOC Operations',
       items: [
         { id: 'dashboard', label: 'SOC Dashboard', icon: LayoutDashboard, badge: 'Phase 4 Active', active: true },
+        { id: 'hosts', label: 'Host Inventory', icon: Server, badge: 'Phase 6 Active', active: true },
         { id: 'alerts', label: 'Alert Triage', icon: BellRing, badge: 'Live Stream', active: true },
         { id: 'incidents', label: 'Incidents', icon: FolderKanban, badge: 'Correlated', active: true },
         { id: 'events', label: 'Event Telemetry', icon: Radio, badge: 'Indexed', active: true },

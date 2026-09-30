@@ -29,7 +29,18 @@ class ThreatIntelCache:
 
     @classmethod
     def get_ttl(cls) -> int:
-        return int(getattr(settings, "THREAT_INTEL_CACHE_TTL_SECONDS", 3600) if settings else 3600)
+        if settings:
+            val = getattr(settings, "THREAT_INTEL_CACHE_TTL", None) or getattr(settings, "THREAT_INTEL_CACHE_TTL_SECONDS", None)
+            if val is not None:
+                return int(val)
+        import os
+        env_val = os.getenv("THREAT_INTEL_CACHE_TTL") or os.getenv("THREAT_INTEL_CACHE_TTL_SECONDS")
+        if env_val:
+            try:
+                return int(env_val)
+            except ValueError:
+                pass
+        return 3600
 
     @classmethod
     async def get(cls, indicator: str, indicator_type: str) -> Optional[Dict[str, Any]]:

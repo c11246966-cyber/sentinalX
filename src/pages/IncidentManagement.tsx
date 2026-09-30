@@ -70,12 +70,20 @@ export const IncidentManagement: React.FC<IncidentManagementProps> = ({
     }
   }, []);
 
-  // Real-time updates
+  // Real-time updates via WebSocket
   useRealtime(
     useCallback((data: any) => {
-      if (['new_incident', 'incident_updated', 'new_alert'].includes(data.type)) {
+      if ([
+        'incident.created',
+        'incident.updated',
+        'alert.created',
+        'new_incident',
+        'incident_updated',
+        'new_alert',
+      ].includes(data.type)) {
         loadIncidents();
-        if (selectedIncident && data.incident && data.incident.id === selectedIncident.id) {
+        const incObj = data.incident || data.data;
+        if (selectedIncident && incObj && incObj.id === selectedIncident.id) {
           handleSelectIncident(selectedIncident);
         }
       }

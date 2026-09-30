@@ -355,3 +355,51 @@ Threat intelligence influences risk scores in a strictly deterministic, bounded 
 | `GET` | `/api/v1/threat-intel/indicators/{indicator}/related-alerts` | Viewer+ | Active alerts mapped to this indicator |
 | `GET` | `/api/v1/threat-intel/indicators/{indicator}/related-incidents` | Viewer+ | Correlated incidents containing this indicator |
 
+---
+
+## 9. Phase 6: Host Inventory & Endpoint Monitoring
+
+### Architecture & Capabilities
+
+SentinelX Phase 6 implements centralized host inventory management, endpoint status tracking, agent heartbeat monitoring, and safe simulated containment controls:
+
+```
+Managed Endpoints (Windows Server, Windows 11, Ubuntu, RHEL, macOS)
+       │
+       ▼ (Periodic Heartbeat & Ingest)
+Host Inventory Dispatcher (FastAPI /api/v1/hosts)
+ ┌─────┼────────────────────────────┬────────────────────────────┐
+ ▼     ▼                            ▼                            ▼
+Host DB Registry      Agent Health Tracker         Simulated Containment        Telemetry Correlation
+(PostgreSQL 16)       (ONLINE / DEGRADED / OFFLINE) (Safe Lab Isolation)         (Correlated Alerts & Events)
+       │
+       ▼
+SOC Dashboard (Real-Time Endpoint Console & Host Details Drawer)
+```
+
+### Dynamic Endpoint Health Statuses
+
+- **ONLINE**: Agent check-in heartbeat received within the last 60 seconds.
+- **DEGRADED**: Check-in received between 60 and 180 seconds ago (potential network latency or agent delay).
+- **OFFLINE**: No check-in received for greater than 180 seconds.
+- **ISOLATED**: Endpoint isolated via safe laboratory containment simulation mode.
+
+### Safe Simulated Containment (Isolation)
+
+- Host containment actions execute strictly in **SAFE LAB SIMULATION MODE**.
+- Physical firewall rules and kernel tables are never tampered with by default.
+- Setting an endpoint to `ISOLATED` dynamically updates calculated risk to 90+, tags associated telemetry, and records an immutable record in the security audit log (`host_isolate` / `host_unisolate`).
+
+### Host Inventory REST APIs
+
+| Method | Endpoint | RBAC Role | Description |
+|---|---|---|---|
+| `GET` | `/api/v1/hosts` | Viewer+ | List monitored endpoints with status, OS, and search filters |
+| `POST` | `/api/v1/hosts` | Analyst+ | Register an endpoint or provision an agent in inventory |
+| `GET` | `/api/v1/hosts/{host_id}` | Viewer+ | Get complete endpoint profile, recent events, and risk |
+| `PATCH` | `/api/v1/hosts/{host_id}` | Analyst+ | Update endpoint metadata, network IP, or status |
+| `POST` | `/api/v1/hosts/{host_id}/heartbeat` | Public/Agent | Update endpoint check-in timestamp and agent version |
+| `POST` | `/api/v1/hosts/{host_id}/isolate` | Analyst+ | Safe simulated host containment / isolation toggle |
+| `DELETE` | `/api/v1/hosts/{host_id}` | Admin | Decommission and remove an endpoint from inventory |
+
+

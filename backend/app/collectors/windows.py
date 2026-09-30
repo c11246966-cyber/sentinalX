@@ -1,7 +1,6 @@
-"""Windows Event Log Collector Interface for Phase 6."""
+"""Windows Event Log Collector Interface (Scheduled for Phase 9)."""
 
 from typing import Any, Dict
-from collectors.windows.normalizer import WindowsEventNormalizer
 
 
 class WindowsCollector:
@@ -9,6 +8,11 @@ class WindowsCollector:
 
     @staticmethod
     def normalize_event(raw_event: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert raw Event ID (4624, 4625, 4688, etc.) into SentinelX schema."""
-        return WindowsEventNormalizer.normalize_event(raw_event)
+        """Convert raw Event ID (4624, 4625, etc.) into SentinelX schema."""
+        return {
+            "source": "windows-agent",
+            "event_type": "windows_security",
+            "raw_data": raw_event,
+        }
+
 

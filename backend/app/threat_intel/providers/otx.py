@@ -21,10 +21,17 @@ class AlienVaultOTXProvider(BaseThreatIntelProvider):
     """Enriches indicators using AlienVault OTX (Open Threat Exchange) Direct Connect API."""
 
     def __init__(self) -> None:
+        timeout_val = (
+            getattr(settings, "THREAT_INTEL_TIMEOUT_S", None)
+            or getattr(settings, "THREAT_INTEL_TIMEOUT_SECONDS", None)
+            or os.getenv("THREAT_INTEL_TIMEOUT_S")
+            or os.getenv("THREAT_INTEL_TIMEOUT_SECONDS")
+            or 5.0
+        )
         super().__init__(
             name="alienvault_otx",
             supported_types=["ipv4", "ipv6", "domain", "url", "hash"],
-            timeout=float(getattr(settings, "THREAT_INTEL_TIMEOUT_SECONDS", 5.0) if settings else 5.0),
+            timeout=float(timeout_val),
         )
 
     def is_configured(self) -> bool:

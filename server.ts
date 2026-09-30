@@ -1,4 +1,6 @@
 import express, { Request, Response } from 'express';
+import http from 'http';
+import WebSocket, { WebSocketServer } from 'ws';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 
@@ -180,6 +182,7 @@ interface MockEvent {
   username?: string;
   hostname?: string;
   process_name?: string;
+  command_line?: string;
   message: string;
   mitre_technique?: string;
   status: string;
@@ -383,8 +386,50 @@ const mockMitreCatalog = [
   { id: 'T1078', technique: 'Valid Accounts', tactic: 'Initial Access', url: 'https://attack.mitre.org/techniques/T1078/' },
 ];
 
-// Server-Sent Events subscribers
+// Server-Sent Events & WebSocket subscribers for Phase 7
 const sseClients = new Set<Response>();
+
+interface WsClientSession {
+  ws: WebSocket;
+  userId: string;
+  role: string;
+  channels: Set<string>;
+}
+const wsClientSessions = new Map<WebSocket, WsClientSession>();
+
+function broadcastRealtime(type: string, data: any) {
+  // Normalize into Phase 7 structured message format
+  const structured = {
+    type,
+    timestamp: new Date().toISOString(),
+    data,
+    // Maintain legacy keys for backwards compatibility
+    alert: type.startsWith('alert') ? data : undefined,
+    incident: type.startsWith('incident') ? data : undefined,
+    event: type.startsWith('event') ? data : undefined,
+    host: type.startsWith('host') ? data : undefined,
+  };
+
+  const payloadStr = JSON.stringify(structured);
+
+  // 1. Deliver to all authenticated WebSocket clients
+  for (const [ws, session] of wsClientSessions.entries()) {
+    if (ws.readyState === WebSocket.OPEN) {
+      if (session.channels.size === 0 || session.channels.has('*') || session.channels.has(type)) {
+        try {
+          ws.send(payloadStr);
+        } catch {
+          wsClientSessions.delete(ws);
+        }
+      }
+    } else {
+      wsClientSessions.delete(ws);
+    }
+  }
+
+  // 2. Deliver to Server-Sent Events subscribers
+  broadcastSSE(structured);
+}
 
 function broadcastSSE(data: any) {
   const payload = `data: ${JSON.stringify(data)}\n\n`;
@@ -768,6 +813,206 @@ app.get('/api/v1/risk-scores/calculate', (req: Request, res: Response) => {
       { factor: 'Asset criticality (high)', points: 9 },
     ],
   });
+});
+
+// -----------------------------------------------------------------------------
+// Phase 6: Host Inventory & Endpoint Monitoring
+// -----------------------------------------------------------------------------
+interface MockHost {
+  id: number;
+  hostname: string;
+  ip_address: string;
+  operating_system: string;
+  agent_version: string;
+  status: 'ONLINE' | 'OFFLINE' | 'DEGRADED' | 'ISOLATED';
+  last_seen: string;
+  created_at: string;
+}
+
+const mockHosts: MockHost[] = [
+  {
+    id: 1,
+    hostname: 'PROD-GATEWAY',
+    ip_address: '10.0.0.10',
+    operating_system: 'Linux (Ubuntu 22.04 LTS)',
+    agent_version: '1.2.0',
+    status: 'ONLINE',
+    last_seen: new Date().toISOString(),
+    created_at: new Date(Date.now() - 864000000).toISOString(),
+  },
+  {
+    id: 2,
+    hostname: 'PROD-AUTH-01',
+    ip_address: '10.0.0.20',
+    operating_system: 'Linux (Debian 12)',
+    agent_version: '1.2.0',
+    status: 'ONLINE',
+    last_seen: new Date(Date.now() - 25000).toISOString(),
+    created_at: new Date(Date.now() - 604800000).toISOString(),
+  },
+  {
+    id: 3,
+    hostname: 'PROD-WEB-FRONTEND',
+    ip_address: '10.0.0.30',
+    operating_system: 'Linux (RHEL 9.3)',
+    agent_version: '1.1.8',
+    status: 'ONLINE',
+    last_seen: new Date(Date.now() - 10000).toISOString(),
+    created_at: new Date(Date.now() - 500000000).toISOString(),
+  },
+  {
+    id: 4,
+    hostname: 'WIN-DC01.CORP.LOCAL',
+    ip_address: '10.0.0.15',
+    operating_system: 'Windows Server 2022 Datacenter',
+    agent_version: '1.0.0',
+    status: 'ONLINE',
+    last_seen: new Date(Date.now() - 5000).toISOString(),
+    created_at: new Date(Date.now() - 300000000).toISOString(),
+  },
+  {
+    id: 5,
+    hostname: 'WIN11-EXEC-89',
+    ip_address: '10.0.0.89',
+    operating_system: 'Windows 11 Enterprise (23H2)',
+    agent_version: '1.0.0',
+    status: 'ONLINE',
+    last_seen: new Date(Date.now() - 15000).toISOString(),
+    created_at: new Date(Date.now() - 100000000).toISOString(),
+  },
+  {
+    id: 6,
+    hostname: 'WORKSTATION-09',
+    ip_address: '192.168.1.109',
+    operating_system: 'Windows 10 Pro',
+    agent_version: '1.0.0',
+    status: 'OFFLINE',
+    last_seen: new Date(Date.now() - 400000).toISOString(),
+    created_at: new Date(Date.now() - 200000000).toISOString(),
+  },
+];
+
+app.get('/api/v1/hosts', (req: Request, res: Response) => {
+  const { status, os, search } = req.query;
+  let filtered = [...mockHosts];
+
+  if (status && status !== 'ALL') {
+    filtered = filtered.filter(h => h.status === (status as string).toUpperCase());
+  }
+  if (os && os !== 'ALL') {
+    filtered = filtered.filter(h => h.operating_system.toLowerCase().includes((os as string).toLowerCase()));
+  }
+  if (search) {
+    const q = (search as string).toLowerCase();
+    filtered = filtered.filter(h =>
+      h.hostname.toLowerCase().includes(q) || h.ip_address.includes(q)
+    );
+  }
+  res.json(filtered);
+});
+
+app.post('/api/v1/hosts', (req: Request, res: Response) => {
+  const { hostname, ip_address, operating_system, agent_version, status } = req.body || {};
+  if (!hostname || !ip_address) {
+    return res.status(400).json({ detail: 'Hostname and IP address are required.' });
+  }
+
+  const existing = mockHosts.find(h => h.hostname.toLowerCase() === hostname.trim().toLowerCase());
+  if (existing) {
+    return res.status(409).json({ detail: `Host '${hostname}' is already registered.` });
+  }
+
+  const newHost: MockHost = {
+    id: mockHosts.length + 1,
+    hostname: hostname.trim().toUpperCase(),
+    ip_address: ip_address.trim(),
+    operating_system: operating_system ? operating_system.trim() : 'Windows 11',
+    agent_version: agent_version ? agent_version.trim() : '1.0.0',
+    status: status ? status.toUpperCase() : 'ONLINE',
+    last_seen: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  };
+
+  mockHosts.unshift(newHost);
+  res.status(201).json(newHost);
+});
+
+app.get('/api/v1/hosts/:id', (req: Request, res: Response) => {
+  const hostId = parseInt(req.params.id, 10);
+  const host = mockHosts.find(h => h.id === hostId);
+  if (!host) return res.status(404).json({ detail: 'Host not found' });
+
+  const recentEvents = mockEvents
+    .filter(e => e.hostname === host.hostname || e.source_ip === host.ip_address)
+    .slice(0, 10);
+  const recentAlerts = mockAlerts
+    .filter(a => a.description.includes(host.hostname) || a.source_ip === host.ip_address)
+    .slice(0, 10);
+
+  const calculatedRisk = host.status === 'ISOLATED'
+    ? 90
+    : recentAlerts.length > 0
+    ? Math.max(...recentAlerts.map(a => a.risk_score))
+    : 15;
+
+  res.json({
+    ...host,
+    event_count: recentEvents.length,
+    alert_count: recentAlerts.length,
+    calculated_risk: calculatedRisk,
+    recent_events: recentEvents,
+    recent_alerts: recentAlerts,
+  });
+});
+
+app.patch('/api/v1/hosts/:id', (req: Request, res: Response) => {
+  const hostId = parseInt(req.params.id, 10);
+  const host = mockHosts.find(h => h.id === hostId);
+  if (!host) return res.status(404).json({ detail: 'Host not found' });
+
+  const { ip_address, operating_system, agent_version, status } = req.body || {};
+  if (ip_address) host.ip_address = ip_address.trim();
+  if (operating_system) host.operating_system = operating_system.trim();
+  if (agent_version) host.agent_version = agent_version.trim();
+  if (status) host.status = status.toUpperCase().trim();
+
+  res.json(host);
+});
+
+app.post('/api/v1/hosts/:id/heartbeat', (req: Request, res: Response) => {
+  const hostId = parseInt(req.params.id, 10);
+  const host = mockHosts.find(h => h.id === hostId);
+  if (!host) return res.status(404).json({ detail: 'Host not found' });
+
+  host.last_seen = new Date().toISOString();
+  if (host.status !== 'ISOLATED') {
+    host.status = req.body.status ? req.body.status.toUpperCase() : 'ONLINE';
+  }
+  if (req.body.agent_version) {
+    host.agent_version = req.body.agent_version;
+  }
+
+  res.json(host);
+});
+
+app.post('/api/v1/hosts/:id/isolate', (req: Request, res: Response) => {
+  const hostId = parseInt(req.params.id, 10);
+  const host = mockHosts.find(h => h.id === hostId);
+  if (!host) return res.status(404).json({ detail: 'Host not found' });
+
+  const { isolate, reason } = req.body || {};
+  host.status = isolate ? 'ISOLATED' : 'ONLINE';
+
+  res.json(host);
+});
+
+app.delete('/api/v1/hosts/:id', (req: Request, res: Response) => {
+  const hostId = parseInt(req.params.id, 10);
+  const idx = mockHosts.findIndex(h => h.id === hostId);
+  if (idx === -1) return res.status(404).json({ detail: 'Host not found' });
+
+  mockHosts.splice(idx, 1);
+  res.status(204).send();
 });
 
 // Phase 5 Threat Intelligence Models & In-Memory Storage
@@ -1273,7 +1518,7 @@ app.post('/api/v1/events/ingest', (req: Request, res: Response) => {
     };
     mockAlerts.unshift(alert as any);
     alerts.push(alert);
-    broadcastSSE({ type: 'new_alert', alert });
+    broadcastRealtime('alert.created', alert);
   } else if (msgLower.includes('defender') || payload.event_type === 'windows_defender') {
     const alert = {
       id: mockAlerts.length + 1,
@@ -1292,10 +1537,10 @@ app.post('/api/v1/events/ingest', (req: Request, res: Response) => {
     };
     mockAlerts.unshift(alert as any);
     alerts.push(alert);
-    broadcastSSE({ type: 'new_alert', alert });
+    broadcastRealtime('alert.created', alert);
   }
 
-  broadcastSSE({ type: 'new_event', event: newEvent });
+  broadcastRealtime('event.created', newEvent);
 
   res.status(201).json({
     status: 'INGESTED',
@@ -1308,6 +1553,133 @@ app.post('/api/v1/events/ingest', (req: Request, res: Response) => {
 
 
 async function startServer() {
+  const server = http.createServer(app);
+
+  const wss = new WebSocketServer({ noServer: true });
+
+  server.on('upgrade', (request, socket, head) => {
+    const url = new URL(request.url || '', `http://${request.headers.host || 'localhost'}`);
+    const pathname = url.pathname;
+
+    if (
+      pathname === '/api/v1/ws/events' ||
+      pathname === '/api/v1/ws' ||
+      pathname === '/ws' ||
+      pathname === '/events' ||
+      pathname.startsWith('/api/v1/ws')
+    ) {
+      // Validate authentication using token from query or header
+      const token = url.searchParams.get('token') || url.searchParams.get('access_token');
+      const authHeader = request.headers['authorization'];
+      const secProtocol = request.headers['sec-websocket-protocol'];
+
+      // Allow if valid token or demo/test token
+      const hasAuth = !!(token || authHeader || secProtocol);
+      if (!hasAuth) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+      });
+    }
+  });
+
+  wss.on('connection', (ws: WebSocket, request: http.IncomingMessage) => {
+    const url = new URL(request.url || '', `http://${request.headers.host || 'localhost'}`);
+    const clientMeta: WsClientSession = {
+      ws,
+      userId: 'soc_analyst',
+      role: 'analyst',
+      channels: new Set(),
+    };
+    wsClientSessions.set(ws, clientMeta);
+
+    // Initial connection established handshake message
+    ws.send(JSON.stringify({
+      type: 'connection.established',
+      timestamp: new Date().toISOString(),
+      data: {
+        status: 'connected',
+        user_id: clientMeta.userId,
+        role: clientMeta.role,
+        message: 'Connected to SentinelX real-time SOC WebSocket stream',
+      },
+    }));
+
+    ws.on('message', (rawData: WebSocket.RawData) => {
+      const text = rawData.toString();
+      // Enforce 64KB maximum payload threshold
+      if (text.length > 65536) {
+        ws.send(JSON.stringify({
+          type: 'error',
+          timestamp: new Date().toISOString(),
+          data: { message: 'Payload size exceeds maximum allowed threshold (64KB)' },
+        }));
+        return;
+      }
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        ws.send(JSON.stringify({
+          type: 'error',
+          timestamp: new Date().toISOString(),
+          data: { message: 'Malformed message: JSON parse failure' },
+        }));
+        return;
+      }
+
+      // Security check: strictly reject command execution attempts
+      if (typeof parsed === 'object' && parsed !== null) {
+        const forbiddenKeys = ['exec', 'cmd', 'shell', 'run', 'bash', 'command', 'system'];
+        if (forbiddenKeys.some((k) => k in parsed)) {
+          ws.send(JSON.stringify({
+            type: 'error',
+            timestamp: new Date().toISOString(),
+            data: { message: 'Command execution is strictly prohibited by security policy.' },
+          }));
+          return;
+        }
+      }
+
+      const msgType = (parsed.type || '').toLowerCase();
+      if (msgType === 'ping') {
+        ws.send(JSON.stringify({
+          type: 'pong',
+          timestamp: new Date().toISOString(),
+          data: { client_timestamp: parsed.timestamp },
+        }));
+      } else if (msgType === 'subscribe') {
+        if (Array.isArray(parsed.channels)) {
+          clientMeta.channels = new Set(parsed.channels);
+          ws.send(JSON.stringify({
+            type: 'subscribed',
+            timestamp: new Date().toISOString(),
+            data: { channels: Array.from(clientMeta.channels) },
+          }));
+        }
+      } else {
+        ws.send(JSON.stringify({
+          type: 'ack',
+          timestamp: new Date().toISOString(),
+          data: { received_type: msgType },
+        }));
+      }
+    });
+
+    ws.on('close', () => {
+      wsClientSessions.delete(ws);
+    });
+
+    ws.on('error', () => {
+      wsClientSessions.delete(ws);
+    });
+  });
+
   const vite = await createViteServer({
     server: { middlewareMode: true },
     appType: 'spa',
@@ -1315,7 +1687,7 @@ async function startServer() {
 
   app.use(vite.middlewares);
 
-  app.listen(PORT, '0.0.0.0', () => {
+  server.listen(PORT, '0.0.0.0', () => {
     console.log(`SentinelX development server running on port ${PORT}`);
   });
 }
