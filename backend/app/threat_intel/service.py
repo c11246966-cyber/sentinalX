@@ -184,7 +184,31 @@ class ThreatIntelManager:
 
         primary_provider = providers_reporting[0] if len(providers_reporting) == 1 else "consensus"
 
+        # Determine threat category, description, and matching reason from reporting results
+        threat_cat = None
+        description = None
+        matching_reason = None
+        is_known = False
+
+        for r in results:
+            if r.get("known"):
+                is_known = True
+            if r.get("threat_category") and r.get("threat_category") != "Uncategorized":
+                threat_cat = r.get("threat_category")
+            if r.get("description") and "not cataloged" not in r.get("description", "").lower():
+                description = r.get("description")
+            if r.get("matching_reason") and "no internal" not in r.get("matching_reason", "").lower():
+                matching_reason = r.get("matching_reason")
+
+        if not threat_cat:
+            threat_cat = "General Threat" if reputation in ("malicious", "suspicious") else ("Internal Infrastructure" if reputation == "clean" else "Uncategorized")
+        if not description:
+            description = f"Indicator evaluated as {reputation.upper()} by {primary_provider}."
+        if not matching_reason:
+            matching_reason = f"Consensus evaluation: {reputation} ({confidence}% confidence)."
+
         return {
+            "known": is_known,
             "indicator": indicator,
             "indicator_type": indicator_type,
             "provider": primary_provider,
@@ -193,10 +217,13 @@ class ThreatIntelManager:
             "reputation": reputation,
             "confidence": confidence,
             "severity": severity,
+            "threat_category": threat_cat,
+            "description": description,
+            "matching_reason": matching_reason,
             "tags": sorted(list(all_tags))[:15],
             "first_seen": now.isoformat(),
             "last_seen": now.isoformat(),
-            "source": "threat_intel",
+            "source": "internal" if "internal" in providers_reporting else "threat_intel",
             "raw_provider_metadata": raw_meta,
             "timestamp": now.isoformat(),
         }
@@ -221,25 +248,39 @@ class ThreatIntelManager:
             record.confidence = data["confidence"]
             record.severity = data["severity"]
             record.tags = data["tags"]
+            if hasattr(record, "threat_category"):
+                record.threat_category = data.get("threat_category")
+            if hasattr(record, "description"):
+                record.description = data.get("description")
+            if hasattr(record, "matching_reason"):
+                record.matching_reason = data.get("matching_reason")
             record.last_seen = now
             record.raw_response = data["raw_provider_metadata"]
             record.updated_at = now
         else:
-            record = ThreatIntelligence(
-                indicator=data["indicator"],
-                indicator_type=data["indicator_type"],
-                provider=data["provider"],
-                reputation=data["reputation"],
-                confidence=data["confidence"],
-                severity=data["severity"],
-                tags=data["tags"],
-                source=data["source"],
-                first_seen=now,
-                last_seen=now,
-                raw_response=data["raw_provider_metadata"],
-                created_at=now,
-                updated_at=now,
-            )
+            record_kwargs = {
+                "indicator": data["indicator"],
+                "indicator_type": data["indicator_type"],
+                "provider": data["provider"],
+                "reputation": data["reputation"],
+                "confidence": data["confidence"],
+                "severity": data["severity"],
+                "tags": data["tags"],
+                "source": data.get("source", "internal"),
+                "first_seen": now,
+                "last_seen": now,
+                "raw_response": data["raw_provider_metadata"],
+                "created_at": now,
+                "updated_at": now,
+            }
+            if hasattr(ThreatIntelligence, "threat_category"):
+                record_kwargs["threat_category"] = data.get("threat_category")
+            if hasattr(ThreatIntelligence, "description"):
+                record_kwargs["description"] = data.get("description")
+            if hasattr(ThreatIntelligence, "matching_reason"):
+                record_kwargs["matching_reason"] = data.get("matching_reason")
+
+            record = ThreatIntelligence(**record_kwargs)
             db.add(record)
 
         await db.commit()

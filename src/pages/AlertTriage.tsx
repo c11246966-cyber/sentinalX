@@ -444,7 +444,7 @@ export const AlertTriage: React.FC<AlertTriageProps> = ({
                 </div>
               )}
 
-              {/* Phase 5 Threat Intelligence Enrichment & Risk Adjustment */}
+              {/* Phase 8 Threat Intelligence Enrichment & Risk Adjustment */}
               {(selectedAlert.threat_intel_context || selectedAlert.risk_adjustment_reason || selectedAlert.source_ip) && (
                 <div className="rounded-lg border border-purple-900/60 bg-purple-950/20 p-3 space-y-2.5 font-mono">
                   <div className="flex items-center justify-between">
@@ -479,12 +479,26 @@ export const AlertTriage: React.FC<AlertTriageProps> = ({
                           {selectedAlert.threat_intel_context.reputation}
                         </span>
                       </div>
+                      {selectedAlert.threat_intel_context.threat_category && (
+                        <div className="flex items-center justify-between bg-slate-950 p-2 rounded border border-purple-900/40">
+                          <span className="text-slate-400">Category:</span>
+                          <span className="text-purple-300 font-semibold text-[11px]">
+                            {selectedAlert.threat_intel_context.threat_category}
+                          </span>
+                        </div>
+                      )}
                       <div className="flex items-center justify-between bg-slate-950 p-2 rounded border border-purple-900/40">
                         <span className="text-slate-400">Confidence:</span>
                         <span className="text-purple-300 font-bold">
-                          {selectedAlert.threat_intel_context.confidence}% ({selectedAlert.threat_intel_context.provider})
+                          {selectedAlert.threat_intel_context.confidence}% ({selectedAlert.threat_intel_context.provider || selectedAlert.threat_intel_context.source || 'internal'})
                         </span>
                       </div>
+                      {selectedAlert.threat_intel_context.matching_reason && (
+                        <div className="p-2 rounded bg-slate-950/60 border border-purple-900/30 text-[11px] text-slate-300">
+                          <span className="text-slate-500 uppercase text-[10px] block font-bold">Evidence:</span>
+                          {selectedAlert.threat_intel_context.matching_reason}
+                        </div>
+                      )}
                       {selectedAlert.threat_intel_context.tags && selectedAlert.threat_intel_context.tags.length > 0 && (
                         <div className="flex flex-wrap gap-1 pt-1">
                           {selectedAlert.threat_intel_context.tags.map((t: string) => (

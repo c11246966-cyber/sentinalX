@@ -17,6 +17,8 @@ class ThreatIntelProviderMeta(BaseModel):
     available: bool
     supported_types: List[str]
     rate_limited: bool = False
+    external: bool = False
+    status: str = "operational"
 
 
 class ProviderStatusResponse(BaseModel):
@@ -31,6 +33,10 @@ class ThreatIntelResult(BaseModel):
     reputation: str  # clean, suspicious, malicious, unknown
     confidence: int = Field(ge=0, le=100)
     severity: str = "LOW"  # INFORMATIONAL, LOW, MEDIUM, HIGH, CRITICAL
+    threat_category: Optional[str] = "General Threat"
+    description: Optional[str] = None
+    matching_reason: Optional[str] = None
+    known: bool = True
     tags: List[str] = Field(default_factory=list)
     first_seen: Optional[datetime] = None
     last_seen: Optional[datetime] = None
@@ -47,6 +53,9 @@ class ThreatIntelligenceRecordResponse(BaseModel):
     reputation: str
     confidence: int
     severity: str
+    threat_category: Optional[str] = None
+    description: Optional[str] = None
+    matching_reason: Optional[str] = None
     tags: Optional[List[str]] = None
     source: Optional[str] = None
     first_seen: datetime

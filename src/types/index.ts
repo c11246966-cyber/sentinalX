@@ -84,6 +84,10 @@ export interface ThreatIntelIndicator {
   reputation: IndicatorReputation;
   confidence: number;
   severity: AlertSeverity | string;
+  threat_category?: string;
+  description?: string;
+  matching_reason?: string;
+  known?: boolean;
   tags: string[];
   source?: string;
   first_seen?: string;
@@ -96,7 +100,10 @@ export interface ThreatIntelIndicator {
 
 export interface ThreatIntelProvider {
   name: string;
+  provider_id?: string;
   configured: boolean;
+  external?: boolean;
+  status?: string;
   available: boolean;
   supported_types: string[];
   rate_limited?: boolean;

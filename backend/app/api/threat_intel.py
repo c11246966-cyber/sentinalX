@@ -1,5 +1,6 @@
 """Threat Intelligence API endpoints for Phase 5."""
 
+from datetime import datetime, timezone
 from typing import Annotated, Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import desc, func, or_, select
@@ -17,6 +18,7 @@ from backend.app.schemas.threat_intel import (
 )
 from backend.app.services.audit_service import AuditService
 from backend.app.threat_intel.indicator import validate_indicator
+from backend.app.threat_intel.providers.internal import InternalIntelProvider
 from backend.app.threat_intel.service import ThreatIntelManager
 
 router = APIRouter()
@@ -119,7 +121,35 @@ async def list_indicators(
 
     query = query.limit(limit).offset(offset)
     result = await db.execute(query)
-    return list(result.scalars().all())
+    records = list(result.scalars().all())
+
+    if not records and offset == 0 and not search and not reputation and not indicator_type:
+        now = datetime.now(timezone.utc)
+        for ind_val, info in InternalIntelProvider.KNOWN_LAB_INDICATORS.items():
+            db.add(
+                ThreatIntelligence(
+                    indicator=ind_val,
+                    indicator_type=info.get("indicator_type", "ipv4"),
+                    provider="internal",
+                    reputation=info["reputation"],
+                    confidence=info["confidence"],
+                    severity=info["severity"],
+                    threat_category=info.get("threat_category", "General Threat"),
+                    description=info.get("description"),
+                    matching_reason=info.get("matching_reason"),
+                    tags=info.get("tags", []),
+                    source="internal",
+                    first_seen=now,
+                    last_seen=now,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        await db.commit()
+        re_result = await db.execute(query)
+        records = list(re_result.scalars().all())
+
+    return records
 
 
 @router.get(

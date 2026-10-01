@@ -34,7 +34,7 @@ export const Header: React.FC<HeaderProps> = ({
                 Sentinel<span className="text-emerald-400">X</span>
               </h1>
               <span className="rounded bg-emerald-950/80 px-2 py-0.5 text-[10px] font-mono font-semibold text-emerald-300 border border-emerald-800/60">
-                PHASE 4 : SOC DASHBOARD & REALTIME
+                PHASE 7 : REAL-TIME WEBSOCKET SOC
               </span>
             </div>
             <p className="text-xs text-slate-400 font-mono">
@@ -56,7 +56,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="hidden md:flex items-center gap-2 bg-slate-900/90 px-3 py-1.5 rounded-md border border-slate-800 text-xs font-mono">
             <Cpu className="h-3.5 w-3.5 text-cyan-400" />
             <span className="text-slate-400">STACK:</span>
-            <span className="text-slate-200">FastAPI • PG16 • SSE</span>
+            <span className="text-slate-200">FastAPI • PG16 • WebSockets</span>
           </div>
 
           <div className="flex items-center gap-2 bg-slate-900/90 px-3 py-1.5 rounded-md border border-slate-800 text-xs font-mono">

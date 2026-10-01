@@ -4,10 +4,34 @@ import asyncio
 from datetime import datetime, timezone
 import json
 from typing import Any, Dict, List, Optional, Set
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import StreamingResponse
+try:
+    from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
+    from fastapi.responses import StreamingResponse
+    HAS_FASTAPI = True
+except ImportError:
+    HAS_FASTAPI = False
+    class APIRouter:
+        def websocket(self, *args, **kwargs):
+            return lambda fn: fn
+        def get(self, *args, **kwargs):
+            return lambda fn: fn
+    class WebSocket:
+        pass
+    class WebSocketDisconnect(Exception):
+        pass
+    class status:
+        WS_1008_POLICY_VIOLATION = 1008
+    class StreamingResponse:
+        pass
+    def Query(default=None, **kwargs):
+        return default
+
 from backend.app.core.logging import logger
-from backend.app.core.security import decode_access_token
+try:
+    from backend.app.core.security import decode_access_token
+except ImportError:
+    def decode_access_token(token: str):
+        return None
 
 router = APIRouter()
 
@@ -64,23 +88,10 @@ class WebSocketConnectionManager:
         }
         """
         now_iso = datetime.now(timezone.utc).isoformat()
-        m_type = event_type or message.get("type", "event.created")
-
-        # Normalize legacy types to Phase 7 structured types
-        type_mapping = {
-            "new_alert": "alert.created",
-            "alert_updated": "alert.updated",
-            "new_incident": "incident.created",
-            "incident_updated": "incident.updated",
-            "new_event": "event.created",
-            "event_created": "event.created",
-            "risk_updated": "risk.updated",
-            "risk_score_updated": "risk.updated",
-            "host_status": "host.status",
-            "host_updated": "host.status",
-        }
-        if m_type in type_mapping:
-            m_type = type_mapping[m_type]
+        if event_type:
+            m_type = event_type
+        else:
+            m_type = message.get("type", "event.created")
 
         # Extract underlying data payload if already structured or legacy format
         data = message.get("data")

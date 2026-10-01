@@ -206,12 +206,12 @@ export const ThreatIntelligence: React.FC<ThreatIntelligenceProps> = ({
             <div>
               <h1 className="text-xl font-bold tracking-tight text-slate-100 flex items-center gap-2">
                 Threat Intelligence & Indicator Enrichment
-                <span className="text-[10px] px-2 py-0.5 rounded font-mono font-semibold bg-cyan-950 text-cyan-400 border border-cyan-800/60">
-                  PHASE 5 OPERATIONAL
+                <span className="text-[10px] px-2 py-0.5 rounded font-mono font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800/60">
+                  PHASE 8 : LOCAL THREAT INTEL & IOC ENRICHMENT
                 </span>
               </h1>
               <p className="text-xs text-slate-400 mt-0.5">
-                Normalized multi-provider IOC enrichment, deterministic risk adjustment, and local Redis caching
+                Local deterministic IOC enrichment, RFC1918 internal classification, explainable risk-scoring integration, and offline curated feeds
               </p>
             </div>
           </div>
@@ -390,7 +390,10 @@ export const ThreatIntelligence: React.FC<ThreatIntelligenceProps> = ({
               <option value="ipv6">IPv6 Address</option>
               <option value="domain">Domain Name</option>
               <option value="url">Web URL</option>
-              <option value="hash">File Hash (MD5/SHA256)</option>
+              <option value="md5">MD5 Hash (32-char)</option>
+              <option value="sha1">SHA1 Hash (40-char)</option>
+              <option value="sha256">SHA256 Hash (64-char)</option>
+              <option value="hash">Generic Hash</option>
             </select>
           </div>
 
@@ -453,6 +456,9 @@ export const ThreatIntelligence: React.FC<ThreatIntelligenceProps> = ({
             <option value="ipv6">IPv6</option>
             <option value="domain">Domain</option>
             <option value="url">URL</option>
+            <option value="md5">MD5</option>
+            <option value="sha1">SHA1</option>
+            <option value="sha256">SHA256</option>
             <option value="hash">Hash</option>
           </select>
         </div>
@@ -470,9 +476,9 @@ export const ThreatIntelligence: React.FC<ThreatIntelligenceProps> = ({
                     <th className="py-3 px-4">REPUTATION</th>
                     <th className="py-3 px-4">INDICATOR</th>
                     <th className="py-3 px-4">TYPE</th>
+                    <th className="py-3 px-4">CATEGORY</th>
                     <th className="py-3 px-4">CONFIDENCE</th>
-                    <th className="py-3 px-4">PROVIDER</th>
-                    <th className="py-3 px-4">TAGS</th>
+                    <th className="py-3 px-4">SOURCE</th>
                     <th className="py-3 px-4">LAST SEEN</th>
                   </tr>
                 </thead>
@@ -497,11 +503,16 @@ export const ThreatIntelligence: React.FC<ThreatIntelligenceProps> = ({
                           <td className="py-3 px-4">
                             {getReputationBadge(ind.reputation)}
                           </td>
-                          <td className="py-3 px-4 font-semibold text-slate-200 max-w-[200px] truncate">
+                          <td className="py-3 px-4 font-semibold text-slate-200 max-w-[180px] truncate" title={ind.indicator}>
                             {ind.indicator}
                           </td>
                           <td className="py-3 px-4 text-slate-400 uppercase text-[11px]">
                             {ind.indicator_type}
+                          </td>
+                          <td className="py-3 px-4 text-slate-300 text-[11px]">
+                            <span className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700/80">
+                              {ind.threat_category || 'General Threat'}
+                            </span>
                           </td>
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-2">
@@ -520,25 +531,8 @@ export const ThreatIntelligence: React.FC<ThreatIntelligenceProps> = ({
                               </div>
                             </div>
                           </td>
-                          <td className="py-3 px-4 text-slate-400 text-[11px]">
-                            {ind.provider}
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex flex-wrap gap-1 max-w-[150px]">
-                              {(ind.tags || []).slice(0, 2).map((t) => (
-                                <span
-                                  key={t}
-                                  className="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 border border-slate-700/60"
-                                >
-                                  {t}
-                                </span>
-                              ))}
-                              {(ind.tags || []).length > 2 && (
-                                <span className="text-[10px] text-slate-500">
-                                  +{ind.tags.length - 2}
-                                </span>
-                              )}
-                            </div>
+                          <td className="py-3 px-4 text-slate-400 text-[11px] uppercase">
+                            {ind.source || ind.provider}
                           </td>
                           <td className="py-3 px-4 text-slate-400 text-[11px] whitespace-nowrap">
                             {ind.last_seen ? new Date(ind.last_seen).toLocaleTimeString() : 'N/A'}
@@ -572,14 +566,43 @@ export const ThreatIntelligence: React.FC<ThreatIntelligenceProps> = ({
                 <h3 className="text-base font-bold text-slate-100 break-all">
                   {selectedIndicator.indicator}
                 </h3>
-                <div className="flex items-center gap-2 mt-2">
+                <div className="flex flex-wrap items-center gap-2 mt-2">
                   {getReputationBadge(selectedIndicator.reputation)}
                   <SeverityBadge severity={selectedIndicator.severity} size="sm" />
                   <span className="text-[11px] text-slate-400 uppercase bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
                     Type: {selectedIndicator.indicator_type}
                   </span>
+                  <span className="text-[11px] text-cyan-300 font-semibold bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800">
+                    {selectedIndicator.threat_category || 'General Threat'}
+                  </span>
                 </div>
               </div>
+
+              {/* Description & Matching Reason */}
+              {(selectedIndicator.description || selectedIndicator.matching_reason) && (
+                <div className="p-3 rounded bg-slate-950 border border-slate-800 space-y-2 text-xs">
+                  {selectedIndicator.description && (
+                    <div>
+                      <span className="text-[10px] text-slate-500 uppercase font-bold block">
+                        Description
+                      </span>
+                      <p className="text-slate-300 mt-0.5 leading-relaxed">
+                        {selectedIndicator.description}
+                      </p>
+                    </div>
+                  )}
+                  {selectedIndicator.matching_reason && (
+                    <div>
+                      <span className="text-[10px] text-slate-500 uppercase font-bold block">
+                        Matching Reason / Evidence
+                      </span>
+                      <p className="text-emerald-400/90 mt-0.5 font-mono text-[11px]">
+                        {selectedIndicator.matching_reason}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Dossier Metrics Grid */}
               <div className="grid grid-cols-2 gap-3 bg-slate-950 p-3 rounded border border-slate-800 text-xs">
@@ -590,9 +613,9 @@ export const ThreatIntelligence: React.FC<ThreatIntelligenceProps> = ({
                   </div>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-500 uppercase">Primary Provider</span>
-                  <div className="text-slate-200 mt-0.5 font-semibold uppercase">
-                    {selectedIndicator.provider}
+                  <span className="text-[10px] text-slate-500 uppercase">Intelligence Source</span>
+                  <div className="text-slate-200 mt-0.5 font-semibold uppercase text-xs">
+                    {selectedIndicator.source || selectedIndicator.provider}
                   </div>
                 </div>
                 <div>
@@ -606,6 +629,35 @@ export const ThreatIntelligence: React.FC<ThreatIntelligenceProps> = ({
                   <div className="text-slate-200 mt-0.5 font-bold text-sm text-rose-400">
                     {relatedIncidents.length}
                   </div>
+                </div>
+              </div>
+
+              {/* Deterministic Risk Adjustment Explanation */}
+              <div className="p-3 rounded bg-slate-950 border border-slate-800 text-xs space-y-1">
+                <span className="text-[10px] text-cyan-400 uppercase font-bold block">
+                  Deterministic Risk Scoring Adjustment
+                </span>
+                <p className="text-[11px] text-slate-300">
+                  {selectedIndicator.reputation === 'malicious' ? (
+                    <span className="text-rose-400">
+                      • Bounded increase (+15 to +25 base points + up to 10 consensus pts + 5 high-impact tags).
+                    </span>
+                  ) : selectedIndicator.reputation === 'suspicious' ? (
+                    <span className="text-amber-400">
+                      • Bounded elevation (+5 to +12 base points).
+                    </span>
+                  ) : selectedIndicator.reputation === 'clean' ? (
+                    <span className="text-emerald-400">
+                      • Verified benign/internal bounded reduction (-5 points on non-critical events).
+                    </span>
+                  ) : (
+                    <span className="text-slate-400">
+                      • Unclassified indicator: no automated risk adjustment applied.
+                    </span>
+                  )}
+                </p>
+                <div className="text-[10px] text-slate-500 pt-0.5">
+                  Final score guaranteed bounded strictly between [0, 100].
                 </div>
               </div>
 

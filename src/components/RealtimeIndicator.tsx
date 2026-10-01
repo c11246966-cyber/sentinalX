@@ -11,7 +11,7 @@ export const RealtimeIndicator: React.FC<RealtimeIndicatorProps> = ({ status, on
   if (status === 'connected') {
     return (
       <div
-        title="Real-time WebSocket connected and receiving telemetry stream"
+        title="Real-time WebSocket connected and receiving telemetry stream (LIVE)"
         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-950/80 border border-emerald-800/80 text-[11px] font-mono text-emerald-300"
       >
         <span className="relative flex h-2 w-2">
@@ -40,7 +40,7 @@ export const RealtimeIndicator: React.FC<RealtimeIndicatorProps> = ({ status, on
   return (
     <button
       onClick={onReconnect}
-      title="WebSocket disconnected. Click to reconnect."
+      title="WebSocket offline. Click to reconnect."
       className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-rose-950/80 border border-rose-800/80 text-[11px] font-mono text-rose-300 hover:bg-rose-900/60 transition cursor-pointer"
     >
       <WifiOff className="h-3 w-3 text-rose-400" />

@@ -18,6 +18,9 @@ class ThreatIntelligence(Base):
     confidence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # 0-100
     severity: Mapped[str] = mapped_column(String(20), default="LOW", nullable=False)  # INFORMATIONAL, LOW, MEDIUM, HIGH, CRITICAL
     tags: Mapped[list | None] = mapped_column(JSON, default=list, nullable=True)
+    threat_category: Mapped[str | None] = mapped_column(String(100), default="General Threat", nullable=True)
+    description: Mapped[str | None] = mapped_column(String(500), default=None, nullable=True)
+    matching_reason: Mapped[str | None] = mapped_column(String(500), default=None, nullable=True)
     source: Mapped[str | None] = mapped_column(String(100), default="threat_intel", nullable=True)
     first_seen: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

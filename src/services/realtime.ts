@@ -22,13 +22,18 @@ class RealtimeClient {
   private backoffDelay = 1000;
   private maxBackoffDelay = 16000;
   private isIntentionalClose = false;
+  private subscribersCount = 0;
+  private reconnectAttempts = 0;
 
   // Deduplication cache to prevent duplicate events after reconnecting
   private seenEventKeys: Set<string> = new Set();
   private maxSeenKeys = 1000;
 
   public connect(): void {
-    if (this.ws || this.status === 'connected') return;
+    // Prevent duplicate connections if already open or connecting
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
 
     this.isIntentionalClose = false;
     this.setStatus('reconnecting');
@@ -37,8 +42,8 @@ class RealtimeClient {
       // Determine WebSocket protocol and host
       const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
       const wsProtocol = isHttps ? 'wss:' : 'ws:';
-      const host = typeof window !== 'undefined' ? window.location.host : 'localhost:3000';
-      const token = typeof localStorage !== 'undefined' ? localStorage.getItem('sentinelx_token') || 'demo-token' : 'demo-token';
+      const host = typeof window !== 'undefined' && window.location.host ? window.location.host : 'localhost:3000';
+      const token = (typeof localStorage !== 'undefined' && localStorage.getItem('sentinelx_token')) || 'demo-token';
 
       const wsUrl = `${wsProtocol}//${host}/api/v1/ws/events?token=${encodeURIComponent(token)}`;
 
@@ -47,6 +52,8 @@ class RealtimeClient {
       this.ws.onopen = () => {
         this.setStatus('connected');
         this.backoffDelay = 1000; // Reset backoff delay on successful connection
+        this.reconnectAttempts = 0;
+        this.cleanUpSSE(); // WebSocket active; clean up fallback SSE
         this.startHeartbeat();
       };
 
@@ -79,10 +86,10 @@ class RealtimeClient {
             type: raw.type,
             timestamp: raw.timestamp || new Date().toISOString(),
             data: raw.data !== undefined ? raw.data : (raw.alert || raw.incident || raw.event || raw.host || raw),
-            alert: raw.alert || (raw.type.startsWith('alert') ? raw.data : undefined),
-            incident: raw.incident || (raw.type.startsWith('incident') ? raw.data : undefined),
-            event: raw.event || (raw.type.startsWith('event') ? raw.data : undefined),
-            host: raw.host || (raw.type.startsWith('host') ? raw.data : undefined),
+            alert: raw.alert || (raw.type?.startsWith('alert') ? raw.data : undefined),
+            incident: raw.incident || (raw.type?.startsWith('incident') ? raw.data : undefined),
+            event: raw.event || (raw.type?.startsWith('event') ? raw.data : undefined),
+            host: raw.host || (raw.type?.startsWith('host') ? raw.data : undefined),
           };
 
           this.listeners.forEach((callback) => {
@@ -98,23 +105,27 @@ class RealtimeClient {
       };
 
       this.ws.onerror = () => {
-        this.cleanUp();
-        // Fall back to SSE if WebSocket encounters failure
-        this.tryFallbackSSE();
+        console.debug('Realtime WebSocket error occurred, attempting recovery');
       };
 
-      this.ws.onclose = (ev) => {
+      this.ws.onclose = () => {
         this.cleanUp();
-        if (!this.isIntentionalClose) {
+        if (!this.isIntentionalClose && this.subscribersCount > 0) {
           this.setStatus('reconnecting');
+          this.reconnectAttempts++;
+          // If WebSocket has difficulty connecting, also activate SSE fallback
+          if (this.reconnectAttempts >= 2) {
+            this.tryFallbackSSE();
+          }
           this.scheduleReconnect();
         } else {
           this.setStatus('disconnected');
         }
       };
     } catch (err) {
-      console.warn('Failed to initialize WebSocket client, falling back to SSE:', err);
+      console.warn('Failed to initialize WebSocket client, attempting fallback SSE:', err);
       this.tryFallbackSSE();
+      this.scheduleReconnect();
     }
   }
 
@@ -154,16 +165,9 @@ class RealtimeClient {
 
       this.sse.onerror = () => {
         this.cleanUpSSE();
-        if (!this.isIntentionalClose) {
-          this.setStatus('reconnecting');
-          this.scheduleReconnect();
-        } else {
-          this.setStatus('disconnected');
-        }
       };
-    } catch (err) {
-      this.setStatus('disconnected');
-      this.scheduleReconnect();
+    } catch {
+      // Ignore
     }
   }
 
@@ -195,8 +199,10 @@ class RealtimeClient {
 
   private scheduleReconnect(): void {
     if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
+    if (this.subscribersCount <= 0 && !this.isIntentionalClose) return;
+
     this.reconnectTimeout = setTimeout(() => {
-      this.backoffDelay = Math.min(this.backoffDelay * 2, this.maxBackoffDelay);
+      this.backoffDelay = Math.min(this.backoffDelay * 1.5, this.maxBackoffDelay);
       this.connect();
     }, this.backoffDelay);
   }
@@ -242,6 +248,18 @@ class RealtimeClient {
     this.setStatus('disconnected');
   }
 
+  public incrementSubscribers(): void {
+    this.subscribersCount++;
+    this.connect();
+  }
+
+  public decrementSubscribers(): void {
+    this.subscribersCount = Math.max(0, this.subscribersCount - 1);
+    if (this.subscribersCount === 0) {
+      this.disconnect();
+    }
+  }
+
   private setStatus(newStatus: RealtimeStatus): void {
     this.status = newStatus;
     this.statusListeners.forEach((fn) => fn(newStatus));
@@ -275,7 +293,7 @@ export function useRealtime(onMessage?: RealtimeCallback) {
   callbackRef.current = onMessage;
 
   useEffect(() => {
-    realtimeClient.connect();
+    realtimeClient.incrementSubscribers();
 
     const unsubStatus = realtimeClient.subscribeStatus((newStatus) => {
       setStatus(newStatus);
@@ -290,6 +308,7 @@ export function useRealtime(onMessage?: RealtimeCallback) {
     return () => {
       unsubStatus();
       unsubMessage();
+      realtimeClient.decrementSubscribers();
     };
   }, []);
 

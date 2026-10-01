@@ -43,9 +43,27 @@ class BaseThreatIntelProvider(ABC):
 
     def safe_metadata(self) -> Dict[str, Any]:
         """Return safe provider status metadata without any credentials."""
+        configured = self.is_configured()
+        is_external = self.name != "internal"
+        if not is_external:
+            status_str = "operational"
+            name_str = "Internal Curated Feed"
+        elif not configured:
+            status_str = "unconfigured"
+            name_str = self.name
+        elif time.time() < self._rate_limited_until:
+            status_str = "rate_limited"
+            name_str = self.name
+        else:
+            status_str = "operational"
+            name_str = self.name
+
         return {
-            "name": self.name,
-            "configured": self.is_configured(),
+            "name": name_str,
+            "provider_id": self.name,
+            "configured": configured,
+            "external": is_external,
+            "status": status_str,
             "available": self.is_available(),
             "supported_types": self.supported_types,
             "rate_limited": time.time() < self._rate_limited_until,
